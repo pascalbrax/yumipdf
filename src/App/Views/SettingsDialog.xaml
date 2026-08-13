@@ -1,0 +1,18 @@
+<ContentDialog
+    x:Class="Pdf26.Views.SettingsDialog"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d"
+    Title="Opzioni"
+    PrimaryButtonText="Salva"
+    CloseButtonText="Annulla"
+    DefaultButton="Primary">
+
+    <StackPanel Spacing="12" MinWidth="300">
+        <TextBlock Text="Colore sfondo area pagina" />
+        <ColorPicker x:Name="BackgroundColorPicker" IsAlphaEnabled="False" ColorSpectrumShape="Ring" />
+    </StackPanel>
+
+</ContentDialog>

@@ -43,7 +43,9 @@ in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 dotnet build 26PDF.slnx -c Debug
 ```
 
-Per compilare/pubblicare solo l'app per un RID specifico (necessario per `publish`, non per `build`):
+Per compilare/pubblicare solo l'app per un RID specifico (necessario per `publish`, non per `build`;
+fare prima una build della solution completa - il compilatore XAML di WinUI3 a volte non risolve i tipi
+del progetto se viene invocato isolatamente prima che esista una build precedente):
 
 ```bash
 dotnet build src/App/App.csproj -c Debug -r win-x64
