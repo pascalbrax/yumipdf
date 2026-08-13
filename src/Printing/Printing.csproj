@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <RootNamespace>Printing</RootNamespace>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <Platforms>x64;arm64</Platforms>
+
+    <!-- Kept in its own (non-WinUI) project: mixing UseWinUI and UseWindowsForms in a
+         single csproj makes the WPF markup compiler (Microsoft.NET.Sdk.WindowsDesktop)
+         intercept the WinUI3 .xaml files and fail with MC6000. -->
+    <UseWindowsForms>true</UseWindowsForms>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\PdfEngine\PdfEngine.csproj" />
+  </ItemGroup>
+
+</Project>

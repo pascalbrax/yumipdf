@@ -1,0 +1,48 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+    <RootNamespace>App26Pdf</RootNamespace>
+    <!-- Must not start with a digit: the CsWinRT AOT source generator derives internal
+         generated type names from the assembly name and mis-sanitizes a leading digit,
+         producing broken codegen (verified while scaffolding this project - see git history
+         for the "26PDF" AssemblyName that triggered CS0246/CS1729 in WinRTVtable.g.cs).
+         The user-facing app name stays "26PDF" via Window.Title and Product/installer metadata. -->
+    <AssemblyName>App26Pdf</AssemblyName>
+    <Product>26PDF</Product>
+    <ApplicationIcon />
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <UseWinUI>true</UseWinUI>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <Platforms>x64;arm64</Platforms>
+
+    <!-- Unpackaged (no MSIX) so it can be shipped via a plain MSI/EXE installer. -->
+    <WindowsPackageType>None</WindowsPackageType>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <SelfContained>true</SelfContained>
+    <RuntimeIdentifiers>win-x64;win-arm64</RuntimeIdentifiers>
+
+    <!-- The app is launched with a document path/URL as argv[1] (file association, "Apri con", drag&amp;drop, protocol). -->
+    <EnableDefaultXamlItems>false</EnableDefaultXamlItems>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.3.1" />
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.28000.2526" />
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\PdfEngine\PdfEngine.csproj" />
+    <ProjectReference Include="..\Printing\Printing.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Manifest Include="$(ApplicationManifest)" />
+  </ItemGroup>
+
+</Project>

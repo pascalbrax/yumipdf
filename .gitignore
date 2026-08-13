@@ -1,0 +1,32 @@
+## .NET / Visual Studio
+bin/
+obj/
+*.user
+.vs/
+*.suo
+
+## WinUI / MSIX packaging
+AppPackages/
+BundleArtifacts/
+*.appx
+*.appxbundle
+*.msix
+*.msixbundle
+*.pfx
+
+## Rider / VS Code
+.idea/
+.vscode/
+
+## Native PDFium binaries (restored via NuGet, not committed)
+src/PdfEngine/runtimes/
+
+## Installer output
+installer/out/
+
+## OS
+Thumbs.db
+Desktop.ini
+
+## Local tool config
+.claude/settings.local.json

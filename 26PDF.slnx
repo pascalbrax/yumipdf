@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/App/App.csproj" />
+    <Project Path="src/PdfEngine/PdfEngine.csproj" />
+    <Project Path="src/Printing/Printing.csproj">
+      <Platform Project="x64" />
+    </Project>
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/PdfEngine.Tests/PdfEngine.Tests.csproj" />
+  </Folder>
+</Solution>
