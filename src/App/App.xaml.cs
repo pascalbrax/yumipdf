@@ -1,8 +1,8 @@
 using Microsoft.UI.Xaml;
-using App26Pdf.Services;
-using App26Pdf.Views;
+using Pdf26.Services;
+using Pdf26.Views;
 
-namespace App26Pdf;
+namespace Pdf26;
 
 public partial class App : Application
 {

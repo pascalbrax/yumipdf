@@ -2,10 +2,10 @@ using System.Runtime.InteropServices.WindowsRuntime;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.UI.Xaml.Media.Imaging;
-using App26Pdf.Services;
+using Pdf26.Services;
 using PdfEngine;
 
-namespace App26Pdf.ViewModels;
+namespace Pdf26.ViewModels;
 
 public partial class MainViewModel : ObservableObject, IDisposable
 {

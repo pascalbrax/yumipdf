@@ -1,4 +1,4 @@
-namespace App26Pdf.Services;
+namespace Pdf26.Services;
 
 /// <summary>
 /// Classifies the document argument passed to the app: local filesystem path

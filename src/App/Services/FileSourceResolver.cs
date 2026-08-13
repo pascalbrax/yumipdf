@@ -1,4 +1,4 @@
-namespace App26Pdf.Services;
+namespace Pdf26.Services;
 
 public sealed class FileSourceResolutionException(string message, Exception? inner = null)
     : Exception(message, inner);
@@ -53,7 +53,7 @@ public sealed class FileSourceResolver
                     $"Il file remoto supera il limite di download di {MaxDownloadBytes / 1024 / 1024} MB.");
             }
 
-            var cacheDir = Path.Combine(Path.GetTempPath(), "26PDF", "cache");
+            var cacheDir = Path.Combine(Path.GetTempPath(), "PDF26", "cache");
             Directory.CreateDirectory(cacheDir);
 
             var fileName = Path.GetFileName(new Uri(url).LocalPath);

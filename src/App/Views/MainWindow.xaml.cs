@@ -1,11 +1,11 @@
 using Microsoft.UI.Xaml;
 using Windows.Storage.Pickers;
 using WinRT.Interop;
-using App26Pdf.Services;
-using App26Pdf.ViewModels;
+using Pdf26.Services;
+using Pdf26.ViewModels;
 using Printing;
 
-namespace App26Pdf.Views;
+namespace Pdf26.Views;
 
 public sealed partial class MainWindow : Window
 {
@@ -18,7 +18,7 @@ public sealed partial class MainWindow : Window
     {
         _initialSource = initialSource;
         InitializeComponent();
-        Title = "26PDF";
+        Title = "PDF26";
 
         if (_initialSource is not null)
         {
@@ -52,7 +52,7 @@ public sealed partial class MainWindow : Window
         try
         {
             _printService.TryShowPrintDialogAndPrint(
-                WindowNative.GetWindowHandle(this), ViewModel.Document, ViewModel.DocumentTitle ?? "26PDF");
+                WindowNative.GetWindowHandle(this), ViewModel.Document, ViewModel.DocumentTitle ?? "PDF26");
         }
         catch (Exception ex)
         {

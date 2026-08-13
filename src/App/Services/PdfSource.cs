@@ -1,4 +1,4 @@
-namespace App26Pdf.Services;
+namespace Pdf26.Services;
 
 public enum PdfSourceKind
 {

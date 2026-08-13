@@ -1,4 +1,4 @@
-# 26PDF
+# PDF26
 
 Visualizzatore, editor e compilatore di moduli PDF nativo per Windows 10 e 11.
 

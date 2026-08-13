@@ -4,14 +4,14 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
     <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
-    <RootNamespace>App26Pdf</RootNamespace>
-    <!-- Must not start with a digit: the CsWinRT AOT source generator derives internal
-         generated type names from the assembly name and mis-sanitizes a leading digit,
-         producing broken codegen (verified while scaffolding this project - see git history
-         for the "26PDF" AssemblyName that triggered CS0246/CS1729 in WinRTVtable.g.cs).
-         The user-facing app name stays "26PDF" via Window.Title and Product/installer metadata. -->
-    <AssemblyName>App26Pdf</AssemblyName>
-    <Product>26PDF</Product>
+    <RootNamespace>Pdf26</RootNamespace>
+    <!-- AssemblyName must not START with a digit: the CsWinRT AOT source generator derives
+         internal generated type names from the assembly name and mis-sanitizes a leading
+         digit, producing broken codegen (verified while scaffolding this project - the
+         original "26PDF" AssemblyName triggered CS0246/CS1729 in WinRTVtable.g.cs).
+         "PDF26" starts with a letter, so it does not hit that bug. -->
+    <AssemblyName>PDF26</AssemblyName>
+    <Product>PDF26</Product>
     <ApplicationIcon />
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <UseWinUI>true</UseWinUI>

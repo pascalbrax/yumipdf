@@ -55,7 +55,8 @@ con `Microsoft.UI.Xaml.UIElement` di WinUI3. Per questo `src/Printing` usa `Syst
 
 ## Nota sul nome dell'assembly
 
-`AssemblyName` dell'app è `App26Pdf`, non `26PDF`: il generatore di sorgenti CsWinRT (usato da WinUI3/Windows
-App SDK per i binding WinRT) deriva nomi di tipo interni dal nome assembly e non gestisce correttamente un
-nome che inizia con una cifra, generando codice non compilabile (`PDFVtableClasses` non trovato, ecc. -
-verificato scaffoldando questo progetto). Il nome prodotto/finestra resta "26PDF" (`Window.Title`, `<Product>`).
+L'app si chiama **PDF26** (non 26PDF): il generatore di sorgenti CsWinRT (usato da WinUI3/Windows App SDK
+per i binding WinRT) deriva nomi di tipo interni dal nome assembly e non gestisce correttamente un nome che
+**inizia con una cifra** ("26PDF" → generava codice non compilabile, `PDFVtableClasses` non trovato, ecc. -
+verificato scaffoldando questo progetto). "PDF26" inizia con una lettera e non è affetto dal problema;
+`AssemblyName`, `<Product>`, `Window.Title` e la cartella di cache temporanea usano tutti "PDF26".
