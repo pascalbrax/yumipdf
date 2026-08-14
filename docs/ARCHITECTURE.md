@@ -48,6 +48,17 @@ rendering successivi dietro quello in corso (invece di limitarsi ad annullarlo) 
 thread UI in attesa del lock e da non sprecare lavoro renderizzando pagine per una collezione che la
 richiesta piu' recente sta per svuotare.
 
+## Zoom istantaneo ("fake zoom")
+
+Su un cambio di zoom, `RenderAllPagesAsync`/`RunRenderAsync` non svuota piu' `Pages` e non riparte da
+placeholder vuoti: riusa le istanze `PdfPageViewModel` gia' a schermo e ne ridimensiona subito
+`PixelWidth`/`PixelHeight` (`PdfPageViewModel.Resize`, nessuna chiamata PDFium - usa le dimensioni in punti
+gia' note). Il bitmap corrente resta quello vecchio finche' non arriva quello nuovo: `Image` con
+`Stretch="Fill"` lo scala per riempire la nuova dimensione, dando l'illusione di uno zoom istantaneo (pixelato)
+mentre il re-render vero e proprio procede in background e sostituisce il bitmap pagina per pagina senza
+scatti. Questo path si attiva solo per un refresh zoom sullo stesso documento (`isNewDocument: false`);
+l'apertura di un nuovo documento ricostruisce sempre `Pages` da zero, dato che non c'e' nulla da "fingere".
+
 ## Zoom massimo per documento
 
 Lo stesso documento con pagine molto grandi (formato architettonico, ~40x24 pollici) espone un secondo

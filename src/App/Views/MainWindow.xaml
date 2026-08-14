@@ -46,7 +46,7 @@
                 <ItemsControl.ItemTemplate>
                     <DataTemplate x:DataType="vm:PdfPageViewModel">
                         <Border Background="White" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1"
-                                Width="{x:Bind PixelWidth}" Height="{x:Bind PixelHeight}">
+                                Width="{x:Bind PixelWidth, Mode=OneWay}" Height="{x:Bind PixelHeight, Mode=OneWay}">
                             <Image Source="{x:Bind Bitmap, Mode=OneWay}" Stretch="Fill" />
                         </Border>
                     </DataTemplate>

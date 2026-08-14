@@ -111,7 +111,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             _maxZoomForDocument = ComputeMaxZoomForDocument(_document);
             Zoom = Math.Min(Zoom, _maxZoomForDocument);
 
-            await RenderAllPagesAsync(cancellationToken).ConfigureAwait(false);
+            await RenderAllPagesAsync(cancellationToken, isNewDocument: true).ConfigureAwait(false);
             StatusMessage = null;
             return OpenOutcome.Success;
         }
@@ -178,42 +178,49 @@ public partial class MainViewModel : ObservableObject, IDisposable
         Zoom = newZoom;
         OnPropertyChanged(nameof(ZoomPercent));
         OnPropertyChanged(nameof(ZoomPercentText));
-        await RenderAllPagesAsync(CancellationToken.None).ConfigureAwait(true);
+        await RenderAllPagesAsync(CancellationToken.None, isNewDocument: false).ConfigureAwait(true);
     }
 
     public PdfDocument? Document => _document;
 
     /// <summary>
-    /// Two-phase render: first lay out a placeholder for every page using only its point size
-    /// (cheap - no bitmap decode), so the scrollable area has the right total height and the
-    /// scrollbar/page count are correct immediately; then fill in bitmaps progressively in the
-    /// background.
+    /// Two-phase render: first size every page for the current zoom (cheap - no bitmap
+    /// decode), so the scrollable area/scrollbar are correct immediately; then fill in
+    /// bitmaps progressively in the background.
     /// </summary>
+    /// <param name="isNewDocument">
+    /// <c>true</c> when called right after opening a document (nothing on screen yet, so
+    /// <see cref="Pages"/> is rebuilt from scratch with empty placeholders). <c>false</c> for
+    /// a zoom-only refresh of the document already showing: the existing
+    /// <see cref="PdfPageViewModel"/> instances are resized in place instead, so their
+    /// *current* bitmap is immediately stretched/shrunk to the new size (a fast, pixelated
+    /// "fake zoom") rather than the page going blank until the real re-render finishes.
+    /// </param>
     /// <remarks>
     /// This still renders (and keeps in memory) every page of the document up front - true
     /// viewport virtualization (skip/unload far off-screen pages) is tracked in
     /// docs/ROADMAP.md M1 as a follow-up for very large documents.
     /// </remarks>
-    private Task RenderAllPagesAsync(CancellationToken cancellationToken)
+    private Task RenderAllPagesAsync(CancellationToken cancellationToken, bool isNewDocument)
     {
         // A zoom change (or a fast re-open) can be requested while the previous render is
         // still filling in bitmaps in the background. Chain behind it - rather than letting
         // both run at once - instead of just cancelling: PdfEngine now serializes native
         // calls internally (PdfiumRuntime.Gate), so an overlapping call would no longer
         // corrupt anything, but it would still (a) block the UI thread on that lock while
-        // the placeholder loop below waits its turn, and (b) do wasted work rendering pages
-        // for a Pages collection the newer request is about to clear anyway.
+        // the resize/placeholder step below waits its turn, and (b) do wasted work rendering
+        // pages for a request that is about to be superseded anyway.
         _renderCts?.Cancel();
         var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _renderCts = cts;
 
         var previousRender = _renderTask;
-        var renderTask = RunRenderAsync(previousRender, cts);
+        var renderTask = RunRenderAsync(previousRender, cts, isNewDocument);
         _renderTask = renderTask;
         return renderTask;
     }
 
-    private async Task RunRenderAsync(Task previousRender, CancellationTokenSource cts)
+    private async Task RunRenderAsync(Task previousRender, CancellationTokenSource cts, bool isNewDocument)
     {
         try
         {
@@ -230,22 +237,41 @@ public partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
-        Pages.Clear();
         var document = _document;
         if (document is null)
         {
+            Pages.Clear();
             return;
         }
 
         var zoom = Zoom;
-        var placeholders = new List<PdfPageViewModel>(document.PageCount);
-        for (var index = 0; index < document.PageCount; index++)
+        List<PdfPageViewModel> placeholders;
+
+        if (!isNewDocument && Pages.Count == document.PageCount)
         {
-            using var page = document.GetPage(index);
-            var (widthPt, heightPt) = page.SizeInPoints;
-            var placeholder = new PdfPageViewModel(index, Math.Max(1, widthPt * zoom), Math.Max(1, heightPt * zoom));
-            placeholders.Add(placeholder);
-            Pages.Add(placeholder);
+            // Zoom-only refresh of the document already on screen: resize every page in
+            // place right now (cheap, no PDFium call - PointWidth/Height were captured when
+            // the page was first created) so the layout - and whatever bitmap each page
+            // already has, stretched via Stretch="Fill" - updates instantly, before the
+            // background loop below replaces it with a crisp re-render.
+            placeholders = Pages.ToList();
+            foreach (var placeholder in placeholders)
+            {
+                placeholder.Resize(zoom);
+            }
+        }
+        else
+        {
+            Pages.Clear();
+            placeholders = new List<PdfPageViewModel>(document.PageCount);
+            for (var index = 0; index < document.PageCount; index++)
+            {
+                using var page = document.GetPage(index);
+                var (widthPt, heightPt) = page.SizeInPoints;
+                var placeholder = new PdfPageViewModel(index, widthPt, heightPt, zoom);
+                placeholders.Add(placeholder);
+                Pages.Add(placeholder);
+            }
         }
 
         try
