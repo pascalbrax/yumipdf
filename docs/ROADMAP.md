@@ -11,11 +11,13 @@
 - [x] Viewer minimo (apri, naviga pagine, stampa)
 
 ## M1 - Viewer completo
-- [ ] Zoom/pan, adatta a larghezza/pagina, ricerca testo (`FPDFText_*`)
-- [ ] Navigazione da miniature e da indice (bookmark, `FPDFBookmark_*`)
-- [ ] Rendering asincrono/paginato per documenti grandi (attualmente ogni pagina è renderizzata in modo sincrono sul thread UI)
-- [ ] Gestione documenti protetti da password (già supportata a livello di `PdfDocument.OpenFromBytes(data, password)`, manca l'UI)
-- [ ] Registrazione file association (`.pdf`) + verbo "Apri con" in fase di installazione
+- [x] Zoom (+/-, percentuale in toolbar) e adatta a larghezza/pagina (`MainViewModel.SetZoomAsync/FitWidthAsync/FitPageAsync`)
+- [x] Rendering progressivo: placeholder dimensionati per tutte le pagine subito (scrollbar/altezza corrette da subito), bitmap popolati in background senza bloccare la UI (`RenderAllPagesAsync`)
+- [x] Gestione documenti protetti da password: dialogo password con retry su password errata (`PasswordPromptDialog`, `MainViewModel.OpenOutcome`)
+- [x] Associazione file `.pdf` **opzionale**, attivabile/disattivabile dal menu Opzioni (non in fase di installazione - scelta esplicita dell'utente): registrazione in `HKCU` (nessun privilegio elevato richiesto), nessuna forzatura del default di Windows (non possibile/non desiderabile forgiare `UserChoice`), link diretto alle impostazioni predefinite di Windows per completare la scelta (`FileAssociationService`)
+- [ ] Ricerca testo (`FPDFText_*`) - rimandato: richiede una nuova superficie di binding nativi (`FPDFText_LoadPage`, `FindStart/FindNext`, `GetCharIndex`, ecc.) più UI di evidenziazione risultati
+- [ ] Navigazione da miniature e da indice (bookmark, `FPDFBookmark_*`) - rimandato: binding nativi aggiuntivi + pannello laterale
+- [ ] Virtualizzazione reale del viewport (oggi ogni pagina viene comunque renderizzata e tenuta in memoria, solo in modo progressivo/asincrono - per documenti molto grandi serebbe da scaricare/saltare le pagine lontane dallo scroll corrente)
 
 ## M2 - Compilazione moduli (scrittura)
 - [ ] Verificare il layout di `FPDF_FORMFILLINFO` contro l'header vendorizzato nella versione esatta di `bblanchon.PDFium.Win32` in uso (vedi docs/ARCHITECTURE.md)
@@ -31,8 +33,11 @@
 
 ## M4 - Distribuzione
 - [ ] Installer MSI/EXE (WiX Toolset o Velopack), firma del codice
-- [ ] Associazione file `.pdf` e voce "Apri con" nel registro (installer, non runtime)
 - [ ] Aggiornamenti automatici
+
+Nota: l'associazione file `.pdf` è già implementata come opzione runtime (menu Opzioni, vedi M1),
+non a livello di installer - scelta esplicita dell'utente invece di una registrazione automatica
+silenziosa all'installazione.
 
 ## Backlog / non pianificato
 - Supporto XFA (fuori scope per scelta di progetto)

@@ -10,9 +10,21 @@
     CloseButtonText="Annulla"
     DefaultButton="Primary">
 
-    <StackPanel Spacing="12" MinWidth="300">
-        <TextBlock Text="Colore sfondo area pagina" />
-        <ColorPicker x:Name="BackgroundColorPicker" IsAlphaEnabled="False" ColorSpectrumShape="Ring" />
+    <StackPanel Spacing="20" MinWidth="320">
+
+        <StackPanel Spacing="12">
+            <TextBlock Text="Colore sfondo area pagina" Style="{StaticResource BodyStrongTextBlockStyle}" />
+            <ColorPicker x:Name="BackgroundColorPicker" IsAlphaEnabled="False" ColorSpectrumShape="Ring" />
+        </StackPanel>
+
+        <StackPanel Spacing="4">
+            <ToggleSwitch x:Name="AssociatePdfToggle" Header="Associa i file .pdf a PDF26"
+                          OnContent="Attivo" OffContent="Non attivo" />
+            <HyperlinkButton Content="Apri le impostazioni predefinite di Windows..." Click="OnOpenDefaultAppsSettingsClicked" />
+            <TextBlock TextWrapping="Wrap" Opacity="0.7" FontSize="12"
+                       Text="Windows richiede una conferma manuale per rendere PDF26 l'app predefinita per i file PDF; questa opzione lo rende disponibile nell'elenco delle app da scegliere (tasto destro su un PDF &gt; Apri con, oppure dalle impostazioni predefinite)." />
+        </StackPanel>
+
     </StackPanel>
 
 </ContentDialog>

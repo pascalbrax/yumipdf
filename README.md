@@ -5,14 +5,20 @@ Visualizzatore, editor e compilatore di moduli PDF nativo per Windows 10 e 11.
 ## Funzionalità (stato attuale - vedi [docs/ROADMAP.md](docs/ROADMAP.md))
 
 - Apertura da riga di comando di file locali, percorsi UNC di rete e URL HTTP/HTTPS pubblici
-- Visualizzazione pagine (rendering PDFium)
+- Visualizzazione a scorrimento continuo di tutte le pagine (rendering PDFium), con placeholder
+  dimensionati subito e bitmap popolati progressivamente
+- Zoom (+/-, percentuale) e adatta a larghezza/pagina
+- Apertura di documenti protetti da password, con richiesta e nuovo tentativo in caso di errore
+- Sfondo dell'area pagina personalizzabile (menu Opzioni)
+- Associazione col tipo file `.pdf` attivabile/disattivabile dal menu Opzioni (mai automatica)
 - Unione, suddivisione e riordino di PDF
 - Lettura dei campi AcroForm (nome/tipo/valore)
 - Annotazione di evidenziazione
 - Stampa (dialogo nativo, intervallo pagine)
 
-La compilazione **in scrittura** dei campi modulo, le annotazioni avanzate (nota, disegno libero, timbro) e
-l'installer sono pianificati nelle milestone successive - vedi la roadmap.
+La compilazione **in scrittura** dei campi modulo, la ricerca testo, la navigazione da miniature/indice,
+le annotazioni avanzate (nota, disegno libero, timbro) e l'installer sono pianificati nelle milestone
+successive - vedi la roadmap.
 
 ## Requisiti di sviluppo
 

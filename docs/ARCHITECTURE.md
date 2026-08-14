@@ -53,6 +53,18 @@ con `Microsoft.UI.Xaml.UIElement` di WinUI3. Per questo `src/Printing` usa `Syst
 `PdfPage.RenderToBgra`) sul contesto grafico di stampa. È in un progetto separato perché
 `UseWinUI` e `UseWindowsForms` nello stesso `.csproj` mandano in conflitto il compilatore XAML.
 
+## Associazione file .pdf: perché solo HKCU e nessuna forzatura del default
+
+`Services/FileAssociationService.cs` registra PDF26 come app candidata per aprire i `.pdf` **solo su richiesta
+esplicita dell'utente** (toggle nel menu Opzioni, non in fase di installazione - vedi
+[ROADMAP.md](ROADMAP.md) M1/M4). Scrive solo sotto `HKEY_CURRENT_USER` (nessun privilegio elevato richiesto,
+reversibile disattivando il toggle) seguendo il pattern ufficiale "RegisteredApplications" +
+`OpenWithProgids`. Non tenta di forzare PDF26 come app *predefinita*: dal Vista in poi Windows non permette a
+un programma di scrivere l'hash `UserChoice` che determina il gestore predefinito per utente (misura
+anti-hijacking) - anche volendo, non sarebbe possibile farlo in modo affidabile né appropriato. Il pulsante
+"Apri le impostazioni predefinite di Windows" nello stesso dialogo apre `ms-settings:defaultapps`, dove
+l'utente completa la scelta dalla UI di sistema.
+
 ## Nota sul nome dell'assembly
 
 L'app si chiama **PDF26** (non 26PDF): il generatore di sorgenti CsWinRT (usato da WinUI3/Windows App SDK

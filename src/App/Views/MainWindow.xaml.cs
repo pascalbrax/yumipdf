@@ -25,7 +25,35 @@ public sealed partial class MainWindow : Window
 
         if (_initialSource is not null)
         {
-            _ = ViewModel.OpenAsync(_initialSource);
+            _ = OpenSourceAsync(_initialSource);
+        }
+    }
+
+    /// <summary>Opens a source, prompting for a password (and re-prompting on a wrong one) as many times as needed.</summary>
+    private async Task OpenSourceAsync(PdfSource source)
+    {
+        string? password = null;
+        while (true)
+        {
+            var outcome = await ViewModel.OpenAsync(source, password);
+            if (outcome != OpenOutcome.PasswordRequired)
+            {
+                return;
+            }
+
+            var dialog = new PasswordPromptDialog(previousAttemptFailed: password is not null)
+            {
+                XamlRoot = Content.XamlRoot,
+            };
+
+            var result = await dialog.ShowAsync();
+            if (result != ContentDialogResult.Primary)
+            {
+                ViewModel.StatusMessage = "Apertura annullata: documento protetto da password.";
+                return;
+            }
+
+            password = dialog.Password;
         }
     }
 
@@ -59,7 +87,7 @@ public sealed partial class MainWindow : Window
         var file = await picker.PickSingleFileAsync();
         if (file is not null)
         {
-            await ViewModel.OpenAsync(CommandLineParser.Classify(file.Path));
+            await OpenSourceAsync(CommandLineParser.Classify(file.Path));
         }
     }
 
@@ -81,17 +109,60 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    private async void OnFitWidthClicked(object sender, RoutedEventArgs e)
+    {
+        if (ViewModel.Pages.Count == 0)
+        {
+            return;
+        }
+
+        var firstPage = ViewModel.Pages[0];
+        var pageWidthPoints = firstPage.PixelWidth / ViewModel.Zoom;
+        await ViewModel.FitWidthAsync(PagesScrollViewer.ViewportWidth, pageWidthPoints);
+    }
+
+    private async void OnFitPageClicked(object sender, RoutedEventArgs e)
+    {
+        if (ViewModel.Pages.Count == 0)
+        {
+            return;
+        }
+
+        var firstPage = ViewModel.Pages[0];
+        var pageWidthPoints = firstPage.PixelWidth / ViewModel.Zoom;
+        var pageHeightPoints = firstPage.PixelHeight / ViewModel.Zoom;
+        await ViewModel.FitPageAsync(PagesScrollViewer.ViewportWidth, PagesScrollViewer.ViewportHeight, pageWidthPoints, pageHeightPoints);
+    }
+
     private async void OnSettingsClicked(object sender, RoutedEventArgs e)
     {
-        var dialog = new SettingsDialog(ViewModel.PageAreaBackground.Color)
+        var dialog = new SettingsDialog(ViewModel.PageAreaBackground.Color, FileAssociationService.IsRegistered())
         {
             XamlRoot = Content.XamlRoot,
         };
 
         var result = await dialog.ShowAsync();
-        if (result == ContentDialogResult.Primary)
+        if (result != ContentDialogResult.Primary)
         {
-            ViewModel.UpdateBackgroundColor(dialog.SelectedColor);
+            return;
+        }
+
+        ViewModel.UpdateBackgroundColor(dialog.SelectedColor);
+
+        try
+        {
+            if (dialog.AssociatePdf)
+            {
+                FileAssociationService.Register();
+            }
+            else
+            {
+                FileAssociationService.Unregister();
+            }
+        }
+        catch (Exception ex)
+        {
+            ViewModel.StatusMessage = $"Impossibile aggiornare l'associazione dei file .pdf: {ex.Message}";
         }
     }
 }

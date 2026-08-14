@@ -16,17 +16,26 @@
             <AppBarButton Icon="Back" Label="Precedente" Command="{x:Bind ViewModel.PreviousPageCommand}" />
             <AppBarButton Icon="Forward" Label="Successiva" Command="{x:Bind ViewModel.NextPageCommand}" />
             <AppBarSeparator />
+            <AppBarButton Icon="ZoomOut" Label="Riduci" Command="{x:Bind ViewModel.ZoomOutCommand}" />
+            <AppBarElementContainer VerticalContentAlignment="Center">
+                <TextBlock Text="{x:Bind ViewModel.ZoomPercentText, Mode=OneWay}" MinWidth="48" TextAlignment="Center" />
+            </AppBarElementContainer>
+            <AppBarButton Icon="ZoomIn" Label="Ingrandisci" Command="{x:Bind ViewModel.ZoomInCommand}" />
+            <AppBarButton Label="Adatta a larghezza" Click="OnFitWidthClicked" />
+            <AppBarButton Label="Adatta a pagina" Click="OnFitPageClicked" />
+            <AppBarSeparator />
             <AppBarButton Icon="Setting" Label="Opzioni..." Click="OnSettingsClicked" />
         </CommandBar>
 
         <ScrollViewer x:Name="PagesScrollViewer" Grid.Row="1"
                       HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"
-                      ZoomMode="Enabled" HorizontalScrollMode="Auto" VerticalScrollMode="Auto"
+                      ZoomMode="Disabled" HorizontalScrollMode="Auto" VerticalScrollMode="Auto"
                       Background="{x:Bind ViewModel.PageAreaBackground, Mode=OneWay}">
             <!--
-                Every page is rendered up front and stacked vertically (ItemsControl over a
+                Every page gets a correctly-sized placeholder up front (ItemsControl over a
                 plain, non-virtualizing StackPanel) so the whole document scrolls
-                continuously - no need to step through with Precedente/Successiva.
+                continuously and the scrollbar is right immediately; bitmaps fill in
+                progressively - see MainViewModel.RenderAllPagesAsync.
             -->
             <ItemsControl x:Name="PagesItemsControl" ItemsSource="{x:Bind ViewModel.Pages}" Padding="24">
                 <ItemsControl.ItemsPanel>
@@ -36,8 +45,9 @@
                 </ItemsControl.ItemsPanel>
                 <ItemsControl.ItemTemplate>
                     <DataTemplate x:DataType="vm:PdfPageViewModel">
-                        <Border Background="White" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
-                            <Image Source="{x:Bind Bitmap}" />
+                        <Border Background="White" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1"
+                                Width="{x:Bind PixelWidth}" Height="{x:Bind PixelHeight}">
+                            <Image Source="{x:Bind Bitmap, Mode=OneWay}" Stretch="Fill" />
                         </Border>
                     </DataTemplate>
                 </ItemsControl.ItemTemplate>
