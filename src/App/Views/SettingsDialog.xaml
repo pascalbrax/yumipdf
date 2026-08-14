@@ -10,21 +10,31 @@
     CloseButtonText="Annulla"
     DefaultButton="Primary">
 
-    <StackPanel Spacing="20" MinWidth="320">
+    <!--
+        The dialog's own available height is capped by the main window's current size, and a
+        ContentDialog does not scroll its content by default - on a modest (non-maximized)
+        window the ColorPicker alone is tall enough to push later options (the association
+        toggle) off the bottom, invisibly clipped, until the window is enlarged. Wrapping in a
+        ScrollViewer with a MaxHeight fixes that regardless of window size, and keeps working
+        as more options are added later instead of silently clipping them again.
+    -->
+    <ScrollViewer MaxHeight="480" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <StackPanel Spacing="20" MinWidth="320">
 
-        <StackPanel Spacing="12">
-            <TextBlock Text="Colore sfondo area pagina" Style="{StaticResource BodyStrongTextBlockStyle}" />
-            <ColorPicker x:Name="BackgroundColorPicker" IsAlphaEnabled="False" ColorSpectrumShape="Ring" />
+            <StackPanel Spacing="12">
+                <TextBlock Text="Colore sfondo area pagina" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                <ColorPicker x:Name="BackgroundColorPicker" IsAlphaEnabled="False" ColorSpectrumShape="Ring" />
+            </StackPanel>
+
+            <StackPanel Spacing="4">
+                <ToggleSwitch x:Name="AssociatePdfToggle" Header="Associa i file .pdf a PDF26"
+                              OnContent="Attivo" OffContent="Non attivo" />
+                <HyperlinkButton Content="Apri le impostazioni predefinite di Windows..." Click="OnOpenDefaultAppsSettingsClicked" />
+                <TextBlock TextWrapping="Wrap" Opacity="0.7" FontSize="12"
+                           Text="Windows richiede una conferma manuale per rendere PDF26 l'app predefinita per i file PDF; questa opzione lo rende disponibile nell'elenco delle app da scegliere (tasto destro su un PDF &gt; Apri con, oppure dalle impostazioni predefinite)." />
+            </StackPanel>
+
         </StackPanel>
-
-        <StackPanel Spacing="4">
-            <ToggleSwitch x:Name="AssociatePdfToggle" Header="Associa i file .pdf a PDF26"
-                          OnContent="Attivo" OffContent="Non attivo" />
-            <HyperlinkButton Content="Apri le impostazioni predefinite di Windows..." Click="OnOpenDefaultAppsSettingsClicked" />
-            <TextBlock TextWrapping="Wrap" Opacity="0.7" FontSize="12"
-                       Text="Windows richiede una conferma manuale per rendere PDF26 l'app predefinita per i file PDF; questa opzione lo rende disponibile nell'elenco delle app da scegliere (tasto destro su un PDF &gt; Apri con, oppure dalle impostazioni predefinite)." />
-        </StackPanel>
-
-    </StackPanel>
+    </ScrollViewer>
 
 </ContentDialog>

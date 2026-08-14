@@ -3,6 +3,7 @@ using System.Runtime.InteropServices.WindowsRuntime;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.UI;
+using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Windows.UI;
@@ -51,6 +52,29 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     public partial string? StatusMessage { get; set; }
 
+    /// <summary>Whether the status bar's progress indicator should be visible at all (resolving/opening a source, or rendering pages).</summary>
+    [ObservableProperty]
+    public partial bool IsBusy { get; set; }
+
+    /// <summary>Spinning ("we don't know how long this takes yet" - resolving/opening) vs a determinate percentage (rendering, page count known).</summary>
+    [ObservableProperty]
+    public partial bool IsProgressIndeterminate { get; set; } = true;
+
+    /// <summary>0-100. Only meaningful while <see cref="IsProgressIndeterminate"/> is <c>false</c>.</summary>
+    [ObservableProperty]
+    public partial double ProgressPercent { get; set; }
+
+    /// <summary>
+    /// Exposed instead of a plain bool + XAML converter: x:Bind's codegen for a
+    /// StaticResource-based converter fails when the page root is a <c>Window</c> (not a
+    /// <c>FrameworkElement</c>, which is what WinUI3's Window is) - verified while building
+    /// this feature (CS1503 "cannot convert MainWindow to FrameworkElement" in the generated
+    /// MainWindow.g.cs). Computing Visibility here sidesteps it entirely.
+    /// </summary>
+    public Visibility ProgressVisibility => IsBusy ? Visibility.Visible : Visibility.Collapsed;
+
+    partial void OnIsBusyChanged(bool value) => OnPropertyChanged(nameof(ProgressVisibility));
+
     [ObservableProperty]
     public partial SolidColorBrush PageAreaBackground { get; set; } = new(Colors.Gray);
 
@@ -75,6 +99,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public async Task<OpenOutcome> OpenAsync(PdfSource source, string? password = null, CancellationToken cancellationToken = default)
     {
         StatusMessage = $"Apertura di {source.Value}...";
+        // Indeterminate while resolving/reading the source: its duration is unknown (a UNC
+        // share or an HTTP download can take anywhere from instant to a while). RunRenderAsync
+        // switches this to a determinate per-page percentage once the page count is known.
+        IsBusy = true;
+        IsProgressIndeterminate = true;
         try
         {
             // Reuse the already-resolved local path on a password retry so a remote source
@@ -119,6 +148,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             StatusMessage = $"Errore nell'apertura del documento: {ex.Message}";
             return OpenOutcome.Failed;
+        }
+        finally
+        {
+            IsBusy = false;
         }
     }
 
@@ -274,8 +307,18 @@ public partial class MainViewModel : ObservableObject, IDisposable
             }
         }
 
+        // The page count is always known by this point (whether just counted above or reused
+        // from the resize branch), so rendering itself is always a determinate progress:
+        // this both covers the initial "opening" render (OpenAsync starts out indeterminate
+        // above) and the zoom-triggered "recalculating" re-render (ApplyZoomAsync never sets
+        // IsBusy itself - this is the only progress indicator it gets).
+        IsBusy = true;
+        IsProgressIndeterminate = false;
+        ProgressPercent = 0;
+
         try
         {
+            var completed = 0;
             foreach (var placeholder in placeholders)
             {
                 cts.Token.ThrowIfCancellationRequested();
@@ -297,6 +340,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 }
 
                 placeholder.Bitmap = bitmap;
+
+                completed++;
+                ProgressPercent = placeholders.Count == 0 ? 100 : 100.0 * completed / placeholders.Count;
             }
         }
         catch (OperationCanceledException)
@@ -310,6 +356,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
             // huge page/zoom combination) must not crash the app - surface it and leave
             // whichever pages did render in place.
             StatusMessage = $"Errore durante il rendering: {ex.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
         }
 
         PreviousPageCommand.NotifyCanExecuteChanged();

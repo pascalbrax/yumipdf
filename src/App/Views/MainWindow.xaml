@@ -54,10 +54,14 @@
             </ItemsControl>
         </ScrollViewer>
 
-        <StackPanel Grid.Row="2" Orientation="Horizontal" Padding="12,6" Spacing="16"
+        <StackPanel Grid.Row="2" Orientation="Horizontal" Padding="12,6" Spacing="16" VerticalAlignment="Center"
                     Background="{ThemeResource LayerFillColorDefaultBrush}">
-            <TextBlock Text="{x:Bind ViewModel.DocumentTitle, Mode=OneWay}" />
-            <TextBlock Text="{x:Bind ViewModel.StatusMessage, Mode=OneWay}" Foreground="{ThemeResource SystemFillColorCriticalBrush}" />
+            <TextBlock Text="{x:Bind ViewModel.DocumentTitle, Mode=OneWay}" VerticalAlignment="Center" />
+            <ProgressBar Width="160" VerticalAlignment="Center"
+                         Visibility="{x:Bind ViewModel.ProgressVisibility, Mode=OneWay}"
+                         IsIndeterminate="{x:Bind ViewModel.IsProgressIndeterminate, Mode=OneWay}"
+                         Minimum="0" Maximum="100" Value="{x:Bind ViewModel.ProgressPercent, Mode=OneWay}" />
+            <TextBlock Text="{x:Bind ViewModel.StatusMessage, Mode=OneWay}" Foreground="{ThemeResource SystemFillColorCriticalBrush}" VerticalAlignment="Center" />
         </StackPanel>
 
     </Grid>
