@@ -11,6 +11,7 @@ public partial class App : Application
     public App()
     {
         InitializeComponent();
+        UnhandledException += OnUnhandledException;
     }
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
@@ -22,5 +23,32 @@ public partial class App : Application
 
         _window = new MainWindow(initialSource);
         _window.Activate();
+    }
+
+    /// <summary>
+    /// Last-resort safety net: without this, any exception that escapes an `async void`
+    /// handler (XAML Click handlers are one) terminates the whole process instead of just
+    /// failing the one operation. Logs to %LocalAppData%\PDF26\logs\crash.log and marks the
+    /// exception handled so the app keeps running - this trades "some bugs fail visibly
+    /// louder" for "one bad page/click doesn't kill the whole session", which is the right
+    /// default for a document viewer but does mean genuinely corrupt state could linger
+    /// instead of restarting clean; worth revisiting once there is in-app error reporting.
+    /// </summary>
+    private static void OnUnhandledException(object sender, Microsoft.UI.Xaml.UnhandledExceptionEventArgs e)
+    {
+        try
+        {
+            var logDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "PDF26", "logs");
+            Directory.CreateDirectory(logDir);
+            File.AppendAllText(
+                Path.Combine(logDir, "crash.log"),
+                $"{DateTime.Now:O}{Environment.NewLine}{e.Exception}{Environment.NewLine}{Environment.NewLine}");
+        }
+        catch
+        {
+            // Logging must never itself throw from inside a crash handler.
+        }
+
+        e.Handled = true;
     }
 }

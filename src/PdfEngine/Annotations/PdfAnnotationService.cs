@@ -18,46 +18,49 @@ public static class PdfAnnotationService
     {
         ArgumentNullException.ThrowIfNull(page);
 
-        var annot = PdfiumNative.FPDFPage_CreateAnnot(page.Handle, PdfiumNative.FPDF_ANNOTATION_SUBTYPE.HIGHLIGHT);
-        if (annot == IntPtr.Zero)
+        lock (PdfiumRuntime.Gate)
         {
-            throw PdfException.FromLastPdfiumError("Impossibile creare l'annotazione di evidenziazione.");
-        }
-
-        try
-        {
-            var rect = new PdfiumNative.FS_RECTF
+            var annot = PdfiumNative.FPDFPage_CreateAnnot(page.Handle, PdfiumNative.FPDF_ANNOTATION_SUBTYPE.HIGHLIGHT);
+            if (annot == IntPtr.Zero)
             {
-                Left = rectInPoints.Left,
-                Bottom = rectInPoints.Bottom,
-                Right = rectInPoints.Right,
-                Top = rectInPoints.Top,
-            };
-            if (!PdfiumNative.FPDFAnnot_SetRect(annot, ref rect))
-            {
-                throw PdfException.FromLastPdfiumError("Impossibile impostare l'area dell'evidenziazione.");
+                throw PdfException.FromLastPdfiumError("Impossibile creare l'annotazione di evidenziazione.");
             }
 
-            var quad = new PdfiumNative.FS_QUADPOINTSF
+            try
             {
-                X1 = rectInPoints.Left, Y1 = rectInPoints.Top,
-                X2 = rectInPoints.Right, Y2 = rectInPoints.Top,
-                X3 = rectInPoints.Left, Y3 = rectInPoints.Bottom,
-                X4 = rectInPoints.Right, Y4 = rectInPoints.Bottom,
-            };
-            if (!PdfiumNative.FPDFAnnot_AppendAttachmentPoints(annot, ref quad))
-            {
-                throw PdfException.FromLastPdfiumError("Impossibile impostare l'area di testo evidenziata.");
-            }
+                var rect = new PdfiumNative.FS_RECTF
+                {
+                    Left = rectInPoints.Left,
+                    Bottom = rectInPoints.Bottom,
+                    Right = rectInPoints.Right,
+                    Top = rectInPoints.Top,
+                };
+                if (!PdfiumNative.FPDFAnnot_SetRect(annot, ref rect))
+                {
+                    throw PdfException.FromLastPdfiumError("Impossibile impostare l'area dell'evidenziazione.");
+                }
 
-            if (!PdfiumNative.FPDFAnnot_SetColor(annot, PdfiumNative.FPDFANNOT_COLORTYPE.Color, color.R, color.G, color.B, color.A))
-            {
-                throw PdfException.FromLastPdfiumError("Impossibile impostare il colore dell'evidenziazione.");
+                var quad = new PdfiumNative.FS_QUADPOINTSF
+                {
+                    X1 = rectInPoints.Left, Y1 = rectInPoints.Top,
+                    X2 = rectInPoints.Right, Y2 = rectInPoints.Top,
+                    X3 = rectInPoints.Left, Y3 = rectInPoints.Bottom,
+                    X4 = rectInPoints.Right, Y4 = rectInPoints.Bottom,
+                };
+                if (!PdfiumNative.FPDFAnnot_AppendAttachmentPoints(annot, ref quad))
+                {
+                    throw PdfException.FromLastPdfiumError("Impossibile impostare l'area di testo evidenziata.");
+                }
+
+                if (!PdfiumNative.FPDFAnnot_SetColor(annot, PdfiumNative.FPDFANNOT_COLORTYPE.Color, color.R, color.G, color.B, color.A))
+                {
+                    throw PdfException.FromLastPdfiumError("Impossibile impostare il colore dell'evidenziazione.");
+                }
             }
-        }
-        finally
-        {
-            PdfiumNative.FPDFPage_CloseAnnot(annot);
+            finally
+            {
+                PdfiumNative.FPDFPage_CloseAnnot(annot);
+            }
         }
     }
 

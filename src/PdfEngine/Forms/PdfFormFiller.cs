@@ -46,7 +46,11 @@ public sealed class PdfFormFiller : IDisposable
         // triggers PDFium's interactive/redraw callbacks. Do not call FORM_OnAfterLoadPage,
         // FPDF_FFLDraw, or any FORM_* interaction API against this handle.
         _formInfo = new PdfiumNative.FPDF_FORMFILLINFO { version = 1 };
-        _formHandle = PdfiumNative.FPDFDOC_InitFormFillEnvironment(document.Handle, ref _formInfo);
+        lock (PdfiumRuntime.Gate)
+        {
+            _formHandle = PdfiumNative.FPDFDOC_InitFormFillEnvironment(document.Handle, ref _formInfo);
+        }
+
         if (_formHandle == IntPtr.Zero)
         {
             throw new PdfException(PdfErrorCode.Unknown, "Impossibile inizializzare l'ambiente dei moduli PDF (il documento non contiene un AcroForm?).");
@@ -59,35 +63,38 @@ public sealed class PdfFormFiller : IDisposable
         ThrowIfDisposed();
         var fields = new List<PdfFormField>();
 
-        for (var pageIndex = 0; pageIndex < _document.PageCount; pageIndex++)
+        lock (PdfiumRuntime.Gate)
         {
-            using var page = _document.GetPage(pageIndex);
-            var annotCount = PdfiumNative.FPDFPage_GetAnnotCount(page.Handle);
-
-            for (var annotIndex = 0; annotIndex < annotCount; annotIndex++)
+            for (var pageIndex = 0; pageIndex < _document.PageCount; pageIndex++)
             {
-                var annot = PdfiumNative.FPDFPage_GetAnnot(page.Handle, annotIndex);
-                if (annot == IntPtr.Zero)
-                {
-                    continue;
-                }
+                using var page = _document.GetPage(pageIndex);
+                var annotCount = PdfiumNative.FPDFPage_GetAnnotCount(page.Handle);
 
-                try
+                for (var annotIndex = 0; annotIndex < annotCount; annotIndex++)
                 {
-                    if (PdfiumNative.FPDFAnnot_GetSubtype(annot) != PdfiumNative.FPDF_ANNOTATION_SUBTYPE.WIDGET)
+                    var annot = PdfiumNative.FPDFPage_GetAnnot(page.Handle, annotIndex);
+                    if (annot == IntPtr.Zero)
                     {
                         continue;
                     }
 
-                    var type = (PdfFormFieldType)PdfiumNative.FPDFAnnot_GetFormFieldType(_formHandle, annot);
-                    var name = ReadUtf16String((buf, len) => PdfiumNative.FPDFAnnot_GetFormFieldName(_formHandle, annot, buf, len));
-                    var value = ReadUtf16String((buf, len) => PdfiumNative.FPDFAnnot_GetFormFieldValue(_formHandle, annot, buf, len));
+                    try
+                    {
+                        if (PdfiumNative.FPDFAnnot_GetSubtype(annot) != PdfiumNative.FPDF_ANNOTATION_SUBTYPE.WIDGET)
+                        {
+                            continue;
+                        }
 
-                    fields.Add(new PdfFormField(pageIndex, annotIndex, name, type, value));
-                }
-                finally
-                {
-                    PdfiumNative.FPDFPage_CloseAnnot(annot);
+                        var type = (PdfFormFieldType)PdfiumNative.FPDFAnnot_GetFormFieldType(_formHandle, annot);
+                        var name = ReadUtf16String((buf, len) => PdfiumNative.FPDFAnnot_GetFormFieldName(_formHandle, annot, buf, len));
+                        var value = ReadUtf16String((buf, len) => PdfiumNative.FPDFAnnot_GetFormFieldValue(_formHandle, annot, buf, len));
+
+                        fields.Add(new PdfFormField(pageIndex, annotIndex, name, type, value));
+                    }
+                    finally
+                    {
+                        PdfiumNative.FPDFPage_CloseAnnot(annot);
+                    }
                 }
             }
         }
@@ -125,12 +132,15 @@ public sealed class PdfFormFiller : IDisposable
 
     public void Dispose()
     {
-        if (_disposed)
+        lock (PdfiumRuntime.Gate)
         {
-            return;
-        }
+            if (_disposed)
+            {
+                return;
+            }
 
-        PdfiumNative.FPDFDOC_ExitFormFillEnvironment(_formHandle);
-        _disposed = true;
+            PdfiumNative.FPDFDOC_ExitFormFillEnvironment(_formHandle);
+            _disposed = true;
+        }
     }
 }

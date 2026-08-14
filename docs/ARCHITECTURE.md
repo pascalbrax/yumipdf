@@ -30,6 +30,32 @@ I binari nativi arrivano dal pacchetto NuGet `bblanchon.PDFium.Win32`, che inclu
 - **Buffer del documento**: `FPDF_LoadMemDocument64` non copia i byte passati; PDFium continua a leggere dal buffer per tutta la vita del documento. `PdfDocument` mantiene il `byte[]` sorgente pinnato (`GCHandle`) fino alla `Dispose()`.
 - **Annotazioni di markup** (evidenziazioni, note, timbri) usano l'API "flat" `fpdf_annot.h`, senza bisogno di un ambiente di form-fill.
 
+## Thread-safety: `PdfiumRuntime.Gate`
+
+PDFium (compilato qui senza il supporto opzionale multi-thread) **non è sicuro da chiamare da più di un
+thread alla volta** - nemmeno per pagine/documenti diversi. `PdfDocument` e `PdfPage` prendono il lock
+statico `PdfiumRuntime.Gate` (`lock`/`Monitor`, rientrante sullo stesso thread) attorno a ogni chiamata
+nativa, cosi' che i chiamanti non debbano occuparsene.
+
+Questo non era vero nella prima versione del rendering "a due fasi" di `MainViewModel`
+(`RenderAllPagesAsync`): un cambio di zoom mentre il rendering delle pagine dall'apertura era ancora in
+corso avviava un **secondo** giro di rendering in parallelo al primo sullo stesso `PdfDocument`, da un
+thread diverso - due chiamate PDFium concorrenti, che corrompevano lo stato nativo e mandavano in crash
+il processo (riprodotto e confermato con un documento reale dalle pagine molto grandi, dove il rendering di
+ogni pagina impiega abbastanza da lasciare la finestra di sovrapposizione facilmente raggiungibile
+cliccando zoom subito dopo l'apertura). Oltre al lock, `MainViewModel` ora *accoda* esplicitamente i giri di
+rendering successivi dietro quello in corso (invece di limitarsi ad annullarlo) cosi' da non bloccare il
+thread UI in attesa del lock e da non sprecare lavoro renderizzando pagine per una collezione che la
+richiesta piu' recente sta per svuotare.
+
+## Zoom massimo per documento
+
+Lo stesso documento con pagine molto grandi (formato architettonico, ~40x24 pollici) espone un secondo
+problema: a zoom elevato il bitmap per pagina puo' superare la dimensione massima di texture tipica
+dell'hardware Direct3D (~16384px per lato) oltre a diventare enorme in memoria (oltre 1 GB per pagina).
+`MainViewModel.ComputeMaxZoomForDocument` limita lo zoom massimo selezionabile in base alla pagina piu'
+grande del documento aperto, restando sotto una soglia di sicurezza (`SafeMaxPixelDimension`, 8192px).
+
 ## AcroForm filling: attenzione al layout dello struct
 
 `FPDF_FORMFILLINFO` (usato da `PdfFormFiller` per leggere nome/tipo/valore dei campi) è uno struct C con ~30

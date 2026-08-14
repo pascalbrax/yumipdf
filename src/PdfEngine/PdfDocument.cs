@@ -66,54 +66,63 @@ public sealed class PdfDocument : IDisposable
     {
         get
         {
-            ThrowIfDisposed();
-            return PdfiumNative.FPDF_GetPageCount(_handle);
+            lock (PdfiumRuntime.Gate)
+            {
+                ThrowIfDisposed();
+                return PdfiumNative.FPDF_GetPageCount(_handle);
+            }
         }
     }
 
     public PdfPage GetPage(int index)
     {
-        ThrowIfDisposed();
-        if (index < 0 || index >= PageCount)
+        lock (PdfiumRuntime.Gate)
         {
-            throw new ArgumentOutOfRangeException(nameof(index));
-        }
+            ThrowIfDisposed();
+            if (index < 0 || index >= PageCount)
+            {
+                throw new ArgumentOutOfRangeException(nameof(index));
+            }
 
-        var pageHandle = PdfiumNative.FPDF_LoadPage(_handle, index);
-        if (pageHandle == IntPtr.Zero)
-        {
-            throw PdfException.FromLastPdfiumError($"Impossibile caricare la pagina {index}.");
-        }
+            var pageHandle = PdfiumNative.FPDF_LoadPage(_handle, index);
+            if (pageHandle == IntPtr.Zero)
+            {
+                throw PdfException.FromLastPdfiumError($"Impossibile caricare la pagina {index}.");
+            }
 
-        return new PdfPage(pageHandle, index);
+            return new PdfPage(pageHandle, index);
+        }
     }
 
     /// <summary>Writes the (possibly modified) document to <paramref name="destinationPath"/>.</summary>
     public void SaveAs(string destinationPath, bool removeSecurity = false)
     {
-        ThrowIfDisposed();
-        using var stream = new FileStream(destinationPath, FileMode.Create, FileAccess.Write);
-
-        PdfiumNative.WriteBlockDelegate writeBlock = (_, data, size) =>
+        lock (PdfiumRuntime.Gate)
         {
-            var chunk = new byte[size];
-            Marshal.Copy(data, chunk, 0, (int)size);
-            stream.Write(chunk, 0, (int)size);
-            return 1;
-        };
+            ThrowIfDisposed();
+            using var stream = new FileStream(destinationPath, FileMode.Create, FileAccess.Write);
 
-        var fileWrite = new PdfiumNative.FPDF_FILEWRITE
-        {
-            version = 1,
-            WriteBlock = writeBlock,
-        };
+            PdfiumNative.WriteBlockDelegate writeBlock = (_, data, size) =>
+            {
+                var chunk = new byte[size];
+                Marshal.Copy(data, chunk, 0, (int)size);
+                stream.Write(chunk, 0, (int)size);
+                return 1;
+            };
 
-        var flags = removeSecurity ? PdfiumNative.FPDF_REMOVE_SECURITY : PdfiumNative.FPDF_NO_INCREMENTAL;
-        var ok = PdfiumNative.FPDF_SaveAsCopy(_handle, ref fileWrite, flags);
-        GC.KeepAlive(writeBlock);
-        if (ok == 0)
-        {
-            throw PdfException.FromLastPdfiumError($"Impossibile salvare il documento in '{destinationPath}'.");
+            var fileWrite = new PdfiumNative.FPDF_FILEWRITE
+            {
+                version = 1,
+                WriteBlock = writeBlock,
+            };
+
+            var flags = removeSecurity ? PdfiumNative.FPDF_REMOVE_SECURITY : PdfiumNative.FPDF_NO_INCREMENTAL;
+            var ok = PdfiumNative.FPDF_SaveAsCopy(_handle, ref fileWrite, flags);
+            GC.KeepAlive(writeBlock);
+            if (ok == 0)
+            {
+                throw PdfException.FromLastPdfiumError($"Impossibile salvare il documento in '{destinationPath}'.");
+            }
         }
     }
 
@@ -136,17 +145,20 @@ public sealed class PdfDocument : IDisposable
 
     public void Dispose()
     {
-        if (_disposed)
+        lock (PdfiumRuntime.Gate)
         {
-            return;
-        }
+            if (_disposed)
+            {
+                return;
+            }
 
-        PdfiumNative.FPDF_CloseDocument(_handle);
-        if (_pinnedData is { IsAllocated: true } pinned)
-        {
-            pinned.Free();
-        }
+            PdfiumNative.FPDF_CloseDocument(_handle);
+            if (_pinnedData is { IsAllocated: true } pinned)
+            {
+                pinned.Free();
+            }
 
-        _disposed = true;
+            _disposed = true;
+        }
     }
 }

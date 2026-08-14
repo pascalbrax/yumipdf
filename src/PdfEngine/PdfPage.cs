@@ -21,8 +21,11 @@ public sealed class PdfPage : IDisposable
     {
         get
         {
-            ThrowIfDisposed();
-            return (PdfiumNative.FPDF_GetPageWidth(_handle), PdfiumNative.FPDF_GetPageHeight(_handle));
+            lock (PdfiumRuntime.Gate)
+            {
+                ThrowIfDisposed();
+                return (PdfiumNative.FPDF_GetPageWidth(_handle), PdfiumNative.FPDF_GetPageHeight(_handle));
+            }
         }
     }
 
@@ -33,7 +36,6 @@ public sealed class PdfPage : IDisposable
     /// </summary>
     public byte[] RenderToBgra(int pixelWidth, int pixelHeight, bool renderFormFields = true)
     {
-        ThrowIfDisposed();
         if (pixelWidth <= 0 || pixelHeight <= 0)
         {
             throw new ArgumentOutOfRangeException(nameof(pixelWidth), "Le dimensioni di rendering devono essere positive.");
@@ -44,22 +46,30 @@ public sealed class PdfPage : IDisposable
         var bufferHandle = System.Runtime.InteropServices.GCHandle.Alloc(buffer, System.Runtime.InteropServices.GCHandleType.Pinned);
         try
         {
-            var bitmap = PdfiumNative.FPDFBitmap_CreateEx(
-                pixelWidth, pixelHeight, PdfiumNative.FPDFBitmap_BGRA, bufferHandle.AddrOfPinnedObject(), stride);
-            if (bitmap == IntPtr.Zero)
+            // Held for the whole native call sequence, not just individual P/Invokes: PDFium
+            // (built here without its optional multi-threading support) is not safe to call
+            // into from more than one thread at a time, even for unrelated pages/documents.
+            lock (PdfiumRuntime.Gate)
             {
-                throw PdfException.FromLastPdfiumError("Impossibile creare il bitmap di rendering.");
-            }
+                ThrowIfDisposed();
 
-            try
-            {
-                PdfiumNative.FPDFBitmap_FillRect(bitmap, 0, 0, pixelWidth, pixelHeight, 0xFFFFFFFF);
-                var flags = renderFormFields ? PdfiumNative.FPDF_ANNOT | PdfiumNative.FPDF_LCD_TEXT : PdfiumNative.FPDF_LCD_TEXT;
-                PdfiumNative.FPDF_RenderPageBitmap(bitmap, _handle, 0, 0, pixelWidth, pixelHeight, /* rotate */ 0, flags);
-            }
-            finally
-            {
-                PdfiumNative.FPDFBitmap_Destroy(bitmap);
+                var bitmap = PdfiumNative.FPDFBitmap_CreateEx(
+                    pixelWidth, pixelHeight, PdfiumNative.FPDFBitmap_BGRA, bufferHandle.AddrOfPinnedObject(), stride);
+                if (bitmap == IntPtr.Zero)
+                {
+                    throw PdfException.FromLastPdfiumError("Impossibile creare il bitmap di rendering.");
+                }
+
+                try
+                {
+                    PdfiumNative.FPDFBitmap_FillRect(bitmap, 0, 0, pixelWidth, pixelHeight, 0xFFFFFFFF);
+                    var flags = renderFormFields ? PdfiumNative.FPDF_ANNOT | PdfiumNative.FPDF_LCD_TEXT : PdfiumNative.FPDF_LCD_TEXT;
+                    PdfiumNative.FPDF_RenderPageBitmap(bitmap, _handle, 0, 0, pixelWidth, pixelHeight, /* rotate */ 0, flags);
+                }
+                finally
+                {
+                    PdfiumNative.FPDFBitmap_Destroy(bitmap);
+                }
             }
         }
         finally
@@ -89,12 +99,15 @@ public sealed class PdfPage : IDisposable
 
     public void Dispose()
     {
-        if (_disposed)
+        lock (PdfiumRuntime.Gate)
         {
-            return;
-        }
+            if (_disposed)
+            {
+                return;
+            }
 
-        PdfiumNative.FPDF_ClosePage(_handle);
-        _disposed = true;
+            PdfiumNative.FPDF_ClosePage(_handle);
+            _disposed = true;
+        }
     }
 }

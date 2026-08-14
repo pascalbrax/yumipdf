@@ -18,12 +18,24 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private const double MinZoom = BaseZoom * 0.2;
     private const double MaxZoom = BaseZoom * 6.0;
 
+    /// <summary>
+    /// Upper bound on a single rendered page's pixel width/height, comfortably under the
+    /// ~16384px maximum texture dimension most Direct3D hardware enforces (WriteableBitmap
+    /// is backed by one). Documents with physically huge pages (e.g. architectural drawings -
+    /// this limit was added after a real one with ~40x24 inch pages crashed the app at high
+    /// zoom) get their maximum zoom clamped below <see cref="MaxZoom"/> accordingly - see
+    /// <see cref="ComputeMaxZoomForDocument"/>.
+    /// </summary>
+    private const double SafeMaxPixelDimension = 8192;
+
     private readonly FileSourceResolver _sourceResolver = new();
     private readonly SettingsService _settingsService = new();
     private PdfDocument? _document;
     private PdfSource? _lastResolvedSource;
     private string? _lastResolvedLocalPath;
     private CancellationTokenSource? _renderCts;
+    private Task _renderTask = Task.CompletedTask;
+    private double _maxZoomForDocument = MaxZoom;
 
     public ObservableCollection<PdfPageViewModel> Pages { get; } = new();
 
@@ -96,6 +108,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
             DocumentTitle = Path.GetFileName(localPath);
             PageCount = _document.PageCount;
             CurrentPageIndex = 0;
+            _maxZoomForDocument = ComputeMaxZoomForDocument(_document);
+            Zoom = Math.Min(Zoom, _maxZoomForDocument);
 
             await RenderAllPagesAsync(cancellationToken).ConfigureAwait(false);
             StatusMessage = null;
@@ -126,7 +140,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private bool HasDocument() => _document is not null;
 
-    public Task SetZoomAsync(double zoom) => ApplyZoomAsync(Math.Clamp(zoom, MinZoom, MaxZoom));
+    public Task SetZoomAsync(double zoom) => ApplyZoomAsync(Math.Clamp(zoom, MinZoom, _maxZoomForDocument));
 
     /// <summary>Sets zoom so a page of <paramref name="pageWidthPoints"/> fills <paramref name="viewportWidthPixels"/> (minus a small margin).</summary>
     public Task FitWidthAsync(double viewportWidthPixels, double pageWidthPoints)
@@ -137,7 +151,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
 
         const double margin = 32; // leaves breathing room so the page border isn't flush against the scrollbar
-        return ApplyZoomAsync(Math.Clamp((viewportWidthPixels - margin) / pageWidthPoints, MinZoom, MaxZoom));
+        return ApplyZoomAsync(Math.Clamp((viewportWidthPixels - margin) / pageWidthPoints, MinZoom, _maxZoomForDocument));
     }
 
     /// <summary>Sets zoom so a full page fits within the viewport, both width and height.</summary>
@@ -151,7 +165,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         const double margin = 32;
         var zoomForWidth = (viewportWidthPixels - margin) / pageWidthPoints;
         var zoomForHeight = (viewportHeightPixels - margin) / pageHeightPoints;
-        return ApplyZoomAsync(Math.Clamp(Math.Min(zoomForWidth, zoomForHeight), MinZoom, MaxZoom));
+        return ApplyZoomAsync(Math.Clamp(Math.Min(zoomForWidth, zoomForHeight), MinZoom, _maxZoomForDocument));
     }
 
     private async Task ApplyZoomAsync(double newZoom)
@@ -173,20 +187,48 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// Two-phase render: first lay out a placeholder for every page using only its point size
     /// (cheap - no bitmap decode), so the scrollable area has the right total height and the
     /// scrollbar/page count are correct immediately; then fill in bitmaps progressively in the
-    /// background. PDFium calls happen on a background thread but are never concurrent with
-    /// each other (each page is opened, rendered and closed before the next starts), so this
-    /// does not violate PDFium's single-threaded-access requirement.
+    /// background.
     /// </summary>
     /// <remarks>
     /// This still renders (and keeps in memory) every page of the document up front - true
     /// viewport virtualization (skip/unload far off-screen pages) is tracked in
     /// docs/ROADMAP.md M1 as a follow-up for very large documents.
     /// </remarks>
-    private async Task RenderAllPagesAsync(CancellationToken cancellationToken)
+    private Task RenderAllPagesAsync(CancellationToken cancellationToken)
     {
+        // A zoom change (or a fast re-open) can be requested while the previous render is
+        // still filling in bitmaps in the background. Chain behind it - rather than letting
+        // both run at once - instead of just cancelling: PdfEngine now serializes native
+        // calls internally (PdfiumRuntime.Gate), so an overlapping call would no longer
+        // corrupt anything, but it would still (a) block the UI thread on that lock while
+        // the placeholder loop below waits its turn, and (b) do wasted work rendering pages
+        // for a Pages collection the newer request is about to clear anyway.
         _renderCts?.Cancel();
         var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _renderCts = cts;
+
+        var previousRender = _renderTask;
+        var renderTask = RunRenderAsync(previousRender, cts);
+        _renderTask = renderTask;
+        return renderTask;
+    }
+
+    private async Task RunRenderAsync(Task previousRender, CancellationTokenSource cts)
+    {
+        try
+        {
+            await previousRender.ConfigureAwait(true);
+        }
+        catch
+        {
+            // The previous render already surfaced its own errors/cancellation; this await
+            // only exists to know when it is safe to touch the document again.
+        }
+
+        if (cts.IsCancellationRequested)
+        {
+            return;
+        }
 
         Pages.Clear();
         var document = _document;
@@ -236,11 +278,35 @@ public partial class MainViewModel : ObservableObject, IDisposable
             // Superseded by a newer OpenAsync/zoom change - the placeholders/pages already
             // added belong to the previous request and get cleared at the start of the next one.
         }
+        catch (Exception ex)
+        {
+            // A page failing to render (e.g. an out-of-memory allocation for an unexpectedly
+            // huge page/zoom combination) must not crash the app - surface it and leave
+            // whichever pages did render in place.
+            StatusMessage = $"Errore durante il rendering: {ex.Message}";
+        }
 
         PreviousPageCommand.NotifyCanExecuteChanged();
         NextPageCommand.NotifyCanExecuteChanged();
         ZoomInCommand.NotifyCanExecuteChanged();
         ZoomOutCommand.NotifyCanExecuteChanged();
+    }
+
+    /// <summary>
+    /// Caps zoom so that no page of <paramref name="document"/> can be rendered past
+    /// <see cref="SafeMaxPixelDimension"/> on either axis - see the field's remarks.
+    /// </summary>
+    private static double ComputeMaxZoomForDocument(PdfDocument document)
+    {
+        double maxPointDimension = 1;
+        for (var index = 0; index < document.PageCount; index++)
+        {
+            using var page = document.GetPage(index);
+            var (widthPt, heightPt) = page.SizeInPoints;
+            maxPointDimension = Math.Max(maxPointDimension, Math.Max(widthPt, heightPt));
+        }
+
+        return Math.Min(MaxZoom, SafeMaxPixelDimension / maxPointDimension);
     }
 
     partial void OnCurrentPageIndexChanged(int value)
