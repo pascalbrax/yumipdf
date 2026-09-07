@@ -112,7 +112,72 @@
                             <DataTemplate x:DataType="vm:PdfPageViewModel">
                                 <Border Background="White" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1"
                                         Width="{x:Bind PixelWidth, Mode=OneWay}" Height="{x:Bind PixelHeight, Mode=OneWay}">
-                                    <Image Source="{x:Bind Bitmap, Mode=OneWay}" Stretch="Fill" />
+                                    <Grid>
+                                        <Image Source="{x:Bind Bitmap, Mode=OneWay}" Stretch="Fill" />
+
+                                        <!--
+                                            In-place field editing directly on the page: one
+                                            overlay per editable/checkable field, framed so its
+                                            boundary is visible even before the user interacts
+                                            with it. Shares FormFieldEntryViewModel (and its
+                                            commit methods) with the side panel's list - editing
+                                            through either one updates the same object.
+                                        -->
+                                        <ItemsControl ItemsSource="{x:Bind Fields}" IsTabStop="False"
+                                                      Width="{x:Bind PixelWidth, Mode=OneWay}" Height="{x:Bind PixelHeight, Mode=OneWay}">
+                                            <!--
+                                                ItemsControl's default container is a generated
+                                                ContentPresenter, so a Canvas ItemsPanel with
+                                                Canvas.Left/Top bound on the DataTemplate root
+                                                does not position anything (the root is a
+                                                grandchild of the Canvas, not its direct child -
+                                                confirmed live: every item landed at (0,0)). A
+                                                plain Grid panel stacks every item in the same
+                                                cell instead, and each item positions itself with
+                                                Margin (a normal property x:Bind can set directly
+                                                on the template root) plus Left/Top alignment.
+                                            -->
+                                            <ItemsControl.ItemsPanel>
+                                                <ItemsPanelTemplate>
+                                                    <Grid />
+                                                </ItemsPanelTemplate>
+                                            </ItemsControl.ItemsPanel>
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate x:DataType="vm:FormFieldEntryViewModel">
+                                                    <Grid Margin="{x:Bind OverlayMargin, Mode=OneWay}"
+                                                          Width="{x:Bind OverlayWidth, Mode=OneWay}" Height="{x:Bind OverlayHeight, Mode=OneWay}"
+                                                          HorizontalAlignment="Left" VerticalAlignment="Top"
+                                                          Visibility="{x:Bind OverlayVisibility, Mode=OneWay}">
+
+                                                        <!--
+                                                            MinHeight/MinWidth reset to 0: TextBox's
+                                                            default style otherwise enforces its own
+                                                            ~32px minimum, taller than most AcroForm
+                                                            field rects, which got clipped against the
+                                                            bottom edge of this Grid's much smaller
+                                                            declared Height.
+                                                        -->
+                                                        <TextBox Visibility="{x:Bind TextFieldVisibility}"
+                                                                 Background="#40FFFFFF" BorderBrush="#FF2683DB" BorderThickness="1.5"
+                                                                 Padding="2,0" MinHeight="0" MinWidth="0" VerticalContentAlignment="Center"
+                                                                 FontSize="{x:Bind OverlayFontSize, Mode=OneWay}"
+                                                                 Text="{x:Bind Value, Mode=OneWay}" TextChanged="{x:Bind OnTextChanged}" LostFocus="{x:Bind CommitText}"
+                                                                 ToolTipService.ToolTip="{x:Bind Name}" />
+
+                                                        <Border Visibility="{x:Bind CheckableFieldVisibility}"
+                                                                Background="#40FFFFFF" BorderBrush="#FF2683DB" BorderThickness="1.5"
+                                                                Tapped="{x:Bind OnOverlayCheckTapped}" ToolTipService.ToolTip="{x:Bind Name}">
+                                                            <FontIcon Glyph="&#xE73E;" Foreground="#FF2683DB"
+                                                                      FontSize="{x:Bind OverlayFontSize, Mode=OneWay}"
+                                                                      Visibility="{x:Bind CheckedGlyphVisibility, Mode=OneWay}"
+                                                                      HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                        </Border>
+
+                                                    </Grid>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </Grid>
                                 </Border>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>

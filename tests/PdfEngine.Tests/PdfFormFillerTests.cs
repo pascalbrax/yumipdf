@@ -22,22 +22,22 @@ public class PdfFormFillerTests
     }
 
     [Fact]
-    public void SetFieldValue_OnNonTextField_Throws()
+    public void SetFieldValueAndRender_OnNonTextField_Throws()
     {
         using var document = PdfDocument.CreateEmpty();
         using var filler = new PdfFormFiller(document);
-        var fakeCheckboxField = new PdfFormField(0, 0, "fake", PdfFormFieldType.CheckBox, "Off", IsChecked: false);
+        var fakeCheckboxField = new PdfFormField(0, 0, "fake", PdfFormFieldType.CheckBox, "Off", IsChecked: false, 0, 0, 0, 0);
 
-        Assert.Throws<NotSupportedException>(() => filler.SetFieldValue(fakeCheckboxField, "x"));
+        Assert.Throws<NotSupportedException>(() => filler.SetFieldValueAndRender(fakeCheckboxField, "x", 10, 10));
     }
 
     [Fact]
-    public void SetChecked_OnTextField_Throws()
+    public void SetCheckedAndRender_OnTextField_Throws()
     {
         using var document = PdfDocument.CreateEmpty();
         using var filler = new PdfFormFiller(document);
-        var fakeTextField = new PdfFormField(0, 0, "fake", PdfFormFieldType.Text, "", IsChecked: false);
+        var fakeTextField = new PdfFormField(0, 0, "fake", PdfFormFieldType.Text, "", IsChecked: false, 0, 0, 0, 0);
 
-        Assert.Throws<NotSupportedException>(() => filler.SetChecked(fakeTextField, true));
+        Assert.Throws<NotSupportedException>(() => filler.SetCheckedAndRender(fakeTextField, true, 10, 10));
     }
 }

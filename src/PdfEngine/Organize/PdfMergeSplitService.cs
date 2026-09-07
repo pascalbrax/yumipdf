@@ -71,8 +71,7 @@ public static class PdfMergeSplitService
     }
 
     private static void ImportPages(PdfDocument source, PdfDocument destination, int[] pageIndices)
-    {
-        lock (PdfiumRuntime.Gate)
+        => PdfiumRuntime.Invoke(() =>
         {
             // Append at the current end of the destination document (0 == first page, so the
             // current page count is always "just past the last page").
@@ -83,6 +82,5 @@ public static class PdfMergeSplitService
             {
                 throw PdfException.FromLastPdfiumError("Impossibile importare le pagine nel documento di destinazione.");
             }
-        }
-    }
+        });
 }

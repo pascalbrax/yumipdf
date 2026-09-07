@@ -1,6 +1,7 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
 using PdfEngine.Forms;
 
 namespace Pdf26.ViewModels;
@@ -44,6 +45,61 @@ public partial class FormFieldEntryViewModel : ObservableObject
     public Visibility CheckableFieldVisibility => IsCheckableField ? Visibility.Visible : Visibility.Collapsed;
 
     public Visibility ReadOnlyFieldVisibility => IsReadOnlyField ? Visibility.Visible : Visibility.Collapsed;
+
+    // ---- On-page overlay (in-place editing directly on the rendered page) ----------------
+    // Position/size in pixels, in the same top-left-origin coordinate space as the page
+    // Image, so a caller can lay this out with Canvas.Left/Top - see UpdateOverlay for the
+    // PDF-point-to-pixel conversion (PDF points are bottom-left-origin, the opposite of the
+    // page bitmap, hence the height flip in there).
+
+    // Position is exposed as a Margin (not Canvas.Left/Top) because the overlay ItemsControl's
+    // generated container is a ContentPresenter, not the DataTemplate root itself - Canvas.Left/
+    // Top set on the root has no effect on that ContentPresenter's position within the Canvas
+    // (confirmed live: every field landed at the same (0,0) spot). Margin is a plain property on
+    // the template root, so x:Bind applies it directly with no such indirection.
+    [ObservableProperty]
+    public partial Thickness OverlayMargin { get; set; }
+
+    [ObservableProperty]
+    public partial double OverlayWidth { get; set; } = 1;
+
+    [ObservableProperty]
+    public partial double OverlayHeight { get; set; } = 1;
+
+    [ObservableProperty]
+    public partial double OverlayFontSize { get; set; } = 12;
+
+    /// <summary>
+    /// Whether the on-page overlay is shown at all - pushed by <see cref="MainViewModel"/>
+    /// whenever <see cref="MainViewModel.IsFormPanelOpen"/> changes, rather than each field
+    /// subscribing to the owner's PropertyChanged itself, which would leak every field of a
+    /// previously-open document (they get recreated on each document open, but the owner -
+    /// and any event subscription held by it - lives for the app's whole lifetime).
+    /// </summary>
+    [ObservableProperty]
+    public partial Visibility OverlayVisibility { get; set; } = Visibility.Collapsed;
+
+    public Visibility CheckedGlyphVisibility => IsChecked ? Visibility.Visible : Visibility.Collapsed;
+
+    partial void OnIsCheckedChanged(bool value) => OnPropertyChanged(nameof(CheckedGlyphVisibility));
+
+    /// <summary>Recomputes the overlay's on-screen position/size for a new zoom level - called whenever the owning page is (re)sized.</summary>
+    public void UpdateOverlay(double zoom, double pageHeightPoints)
+    {
+        var left = Field.RectLeft * zoom;
+        var top = (pageHeightPoints - Field.RectTop) * zoom;
+        OverlayMargin = new Thickness(left, top, 0, 0);
+        OverlayWidth = Math.Max(1, (Field.RectRight - Field.RectLeft) * zoom);
+        OverlayHeight = Math.Max(1, (Field.RectTop - Field.RectBottom) * zoom);
+        OverlayFontSize = Math.Clamp(OverlayHeight * 0.6, 8, 20);
+    }
+
+    /// <summary>Tap target for the on-page checkbox/radio overlay (a plain Border, not a WinUI CheckBox - its default chrome/padding does not fit small AcroForm checkbox rectangles well).</summary>
+    public void OnOverlayCheckTapped(object sender, TappedRoutedEventArgs e)
+    {
+        IsChecked = !IsChecked;
+        _ = _owner.ApplyFieldCheckedAsync(this);
+    }
 
     public string TypeLabel => Field.Type switch
     {

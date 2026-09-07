@@ -18,16 +18,11 @@ public sealed class PdfPage : IDisposable
 
     /// <summary>Page size in PDF points (1/72 inch), independent of rotation.</summary>
     public (double Width, double Height) SizeInPoints
-    {
-        get
+        => PdfiumRuntime.Invoke(() =>
         {
-            lock (PdfiumRuntime.Gate)
-            {
-                ThrowIfDisposed();
-                return (PdfiumNative.FPDF_GetPageWidth(_handle), PdfiumNative.FPDF_GetPageHeight(_handle));
-            }
-        }
-    }
+            ThrowIfDisposed();
+            return (PdfiumNative.FPDF_GetPageWidth(_handle), PdfiumNative.FPDF_GetPageHeight(_handle));
+        });
 
     /// <summary>
     /// Renders the page to a top-down 32bpp BGRA pixel buffer at the given pixel size.
@@ -60,10 +55,11 @@ public sealed class PdfPage : IDisposable
         var bufferHandle = System.Runtime.InteropServices.GCHandle.Alloc(buffer, System.Runtime.InteropServices.GCHandleType.Pinned);
         try
         {
-            // Held for the whole native call sequence, not just individual P/Invokes: PDFium
-            // (built here without its optional multi-threading support) is not safe to call
-            // into from more than one thread at a time, even for unrelated pages/documents.
-            lock (PdfiumRuntime.Gate)
+            // Routed through the dedicated PDFium thread for the whole native call sequence,
+            // not just individual P/Invokes: PDFium (built here without its optional
+            // multi-threading support) is not safe to call into from more than one thread at
+            // a time, even for unrelated pages/documents - see PdfiumRuntime's remarks.
+            PdfiumRuntime.Invoke(() =>
             {
                 ThrowIfDisposed();
 
@@ -89,7 +85,7 @@ public sealed class PdfPage : IDisposable
                 {
                     PdfiumNative.FPDFBitmap_Destroy(bitmap);
                 }
-            }
+            });
         }
         finally
         {
@@ -110,8 +106,7 @@ public sealed class PdfPage : IDisposable
     /// <param name="forPrint">Selects the print-oriented vs. normal-display appearance where a field has both.</param>
     /// <returns><c>false</c> if there was nothing to flatten (e.g. no annotations/form fields on the page) - not an error.</returns>
     public bool Flatten(bool forPrint = false)
-    {
-        lock (PdfiumRuntime.Gate)
+        => PdfiumRuntime.Invoke(() =>
         {
             ThrowIfDisposed();
             var flag = forPrint ? PdfiumNative.FLAT_PRINT : PdfiumNative.FLAT_NORMALDISPLAY;
@@ -122,8 +117,7 @@ public sealed class PdfPage : IDisposable
                 PdfiumNative.FLATTEN_NOTHINGTODO => false,
                 _ => throw new PdfException(PdfErrorCode.Unknown, $"Impossibile appiattire la pagina {Index}."),
             };
-        }
-    }
+        });
 
     internal IntPtr Handle
     {
@@ -143,8 +137,7 @@ public sealed class PdfPage : IDisposable
     }
 
     public void Dispose()
-    {
-        lock (PdfiumRuntime.Gate)
+        => PdfiumRuntime.Invoke(() =>
         {
             if (_disposed)
             {
@@ -153,6 +146,5 @@ public sealed class PdfPage : IDisposable
 
             PdfiumNative.FPDF_ClosePage(_handle);
             _disposed = true;
-        }
-    }
+        });
 }

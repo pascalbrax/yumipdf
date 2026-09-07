@@ -47,6 +47,21 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     public partial bool IsFormPanelOpen { get; set; }
 
+    /// <summary>
+    /// The on-page overlay is only useful once the user has opened "Compila modulo" - showing
+    /// every field's frame over the page by default was visually noisy for documents nobody
+    /// intends to fill in. Pushes the new visibility to every field rather than each one
+    /// reading <see cref="IsFormPanelOpen"/> itself - see <see cref="FormFieldEntryViewModel.OverlayVisibility"/>.
+    /// </summary>
+    partial void OnIsFormPanelOpenChanged(bool value)
+    {
+        var visibility = value ? Visibility.Visible : Visibility.Collapsed;
+        foreach (var field in FormFields)
+        {
+            field.OverlayVisibility = visibility;
+        }
+    }
+
     /// <summary>Same reasoning as <see cref="ProgressVisibility"/> - computed here rather than a converter bound from x:Bind.</summary>
     public Visibility FormButtonVisibility => FormFields.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
 
@@ -287,40 +302,86 @@ public partial class MainViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>Commits a text field's edited value and re-renders its page so the change is visible immediately.</summary>
-    public async Task ApplyFieldTextAsync(FormFieldEntryViewModel entry)
-    {
-        if (_formFiller is null)
-        {
-            return;
-        }
-
-        try
-        {
-            _formFiller.SetFieldValue(entry.Field, entry.Value);
-            await RenderSinglePageAsync(entry.Field.PageIndex);
-        }
-        catch (Exception ex)
-        {
-            StatusMessage = $"Impossibile aggiornare il campo '{entry.Field.Name}': {ex.Message}";
-        }
-    }
+    public Task ApplyFieldTextAsync(FormFieldEntryViewModel entry)
+        => EnqueueFieldEditAsync(entry.Field.PageIndex, entry.Field.Name,
+            (formFiller, w, h) => formFiller.SetFieldValueAndRender(entry.Field, entry.Value, w, h));
 
     /// <summary>Commits a checkbox/radio button's new state and re-renders its page.</summary>
-    public async Task ApplyFieldCheckedAsync(FormFieldEntryViewModel entry)
+    public Task ApplyFieldCheckedAsync(FormFieldEntryViewModel entry)
+        => EnqueueFieldEditAsync(entry.Field.PageIndex, entry.Field.Name,
+            (formFiller, w, h) => formFiller.SetCheckedAndRender(entry.Field, entry.IsChecked, w, h));
+
+    /// <summary>
+    /// Queues a field edit (+ the page re-render it requires) strictly behind whatever is
+    /// currently chained on <see cref="_renderTask"/>, and runs the edit itself on a
+    /// background thread rather than synchronously on the caller's (UI) thread.
+    /// </summary>
+    /// <remarks>
+    /// Both used to happen the other way around: <c>PdfFormFiller.SetFieldValue</c>/<c>SetChecked</c>
+    /// ran synchronously, directly on the UI thread, before ever awaiting anything. Filling in
+    /// a field started a background render that holds <c>PdfiumRuntime.Gate</c> for its
+    /// duration; if the *next* field was committed (tabbing
+    /// or clicking to a new field) while that render was still in flight, the synchronous
+    /// <c>SetFieldValue</c> call for it blocked the UI thread waiting on the very same lock -
+    /// freezing the app, and in one observed case bringing the whole process down. Routing the
+    /// edit itself through this same background-and-queued path removes the synchronous
+    /// UI-thread wait entirely: a fast second edit now just waits its turn in the queue
+    /// (asynchronously - the UI stays responsive) instead of blocking the thread that queue
+    /// depends on to ever get unblocked.
+    /// </remarks>
+    private Task EnqueueFieldEditAsync(int pageIndex, string fieldName, Func<PdfFormFiller, int, int, byte[]> editAndRender)
     {
-        if (_formFiller is null)
+        var previousWork = _renderTask;
+        var task = RunFieldEditAsync(previousWork, pageIndex, fieldName, editAndRender);
+        _renderTask = task;
+        return task;
+    }
+
+    private async Task RunFieldEditAsync(Task previousWork, int pageIndex, string fieldName, Func<PdfFormFiller, int, int, byte[]> editAndRender)
+    {
+        try
+        {
+            await previousWork.ConfigureAwait(true);
+        }
+        catch
+        {
+            // Previous work already surfaced its own errors/cancellation; this await only
+            // exists to know when it is safe to touch the document again.
+        }
+
+        var formFiller = _formFiller;
+        if (formFiller is null || pageIndex < 0 || pageIndex >= Pages.Count)
         {
             return;
         }
 
+        var placeholder = Pages[pageIndex];
+        var pixelWidth = (int)Math.Round(placeholder.PixelWidth);
+        var pixelHeight = (int)Math.Round(placeholder.PixelHeight);
+
+        IsBusy = true;
+        IsProgressIndeterminate = false;
+        ProgressPercent = 0;
         try
         {
-            _formFiller.SetChecked(entry.Field, entry.IsChecked);
-            await RenderSinglePageAsync(entry.Field.PageIndex);
+            var bgra = await Task.Run(() => editAndRender(formFiller, pixelWidth, pixelHeight)).ConfigureAwait(true);
+
+            var bitmap = new WriteableBitmap(pixelWidth, pixelHeight);
+            using (var stream = bitmap.PixelBuffer.AsStream())
+            {
+                stream.Write(bgra, 0, bgra.Length);
+            }
+
+            placeholder.Bitmap = bitmap;
+            ProgressPercent = 100;
         }
         catch (Exception ex)
         {
-            StatusMessage = $"Impossibile aggiornare il campo '{entry.Field.Name}': {ex.Message}";
+            StatusMessage = $"Impossibile aggiornare il campo '{fieldName}': {ex.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
         }
     }
 
@@ -402,62 +463,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
         return page.RenderToBgra(pixelWidth, pixelHeight);
     }
 
-    /// <summary>Re-renders a single already-rendered page in place - used after editing a form field, far cheaper than re-rendering the whole document.</summary>
-    private Task RenderSinglePageAsync(int pageIndex)
-    {
-        var previousRender = _renderTask;
-        var task = RenderSinglePageCoreAsync(previousRender, pageIndex);
-        _renderTask = task;
-        return task;
-    }
-
-    private async Task RenderSinglePageCoreAsync(Task previousRender, int pageIndex)
-    {
-        try
-        {
-            await previousRender.ConfigureAwait(true);
-        }
-        catch
-        {
-            // Same reasoning as RunRenderAsync: only waiting to know it is safe to proceed.
-        }
-
-        var document = _document;
-        var formFiller = _formFiller;
-        if (document is null || pageIndex < 0 || pageIndex >= Pages.Count)
-        {
-            return;
-        }
-
-        var placeholder = Pages[pageIndex];
-        var pixelWidth = (int)Math.Round(placeholder.PixelWidth);
-        var pixelHeight = (int)Math.Round(placeholder.PixelHeight);
-
-        IsBusy = true;
-        IsProgressIndeterminate = false;
-        ProgressPercent = 0;
-        try
-        {
-            var bgra = await Task.Run(() => RenderPageBgra(document, formFiller, pageIndex, pixelWidth, pixelHeight)).ConfigureAwait(true);
-
-            var bitmap = new WriteableBitmap(pixelWidth, pixelHeight);
-            using (var stream = bitmap.PixelBuffer.AsStream())
-            {
-                stream.Write(bgra, 0, bgra.Length);
-            }
-
-            placeholder.Bitmap = bitmap;
-            ProgressPercent = 100;
-        }
-        catch (Exception ex)
-        {
-            StatusMessage = $"Errore durante il rendering: {ex.Message}";
-        }
-        finally
-        {
-            IsBusy = false;
-        }
-    }
 
     /// <summary>
     /// Two-phase render: first size every page for the current zoom (cheap - no bitmap
@@ -546,6 +551,22 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 using var page = document.GetPage(index);
                 var (widthPt, heightPt) = page.SizeInPoints;
                 var placeholder = new PdfPageViewModel(index, widthPt, heightPt, zoom);
+
+                // Editable/checkable fields on this page get an in-place overlay drawn on top
+                // of the page bitmap (see PdfPageViewModel.Fields) - read-only field types
+                // (combo/list/button/signature) are left to the side panel only, since there
+                // is nothing to edit in place for them yet.
+                foreach (var field in FormFields)
+                {
+                    if (field.PageIndex != index || !(field.IsTextField || field.IsCheckableField))
+                    {
+                        continue;
+                    }
+
+                    field.UpdateOverlay(zoom, heightPt);
+                    placeholder.Fields.Add(field);
+                }
+
                 placeholders.Add(placeholder);
                 Pages.Add(placeholder);
             }

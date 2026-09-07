@@ -25,13 +25,16 @@ public sealed class PdfDocument : IDisposable
     internal static PdfDocument CreateEmpty()
     {
         PdfiumRuntime.EnsureInitialized();
-        var handle = PdfiumNative.FPDF_CreateNewDocument();
-        if (handle == IntPtr.Zero)
+        return PdfiumRuntime.Invoke(() =>
         {
-            throw PdfException.FromLastPdfiumError("Impossibile creare un nuovo documento PDF.");
-        }
+            var handle = PdfiumNative.FPDF_CreateNewDocument();
+            if (handle == IntPtr.Zero)
+            {
+                throw PdfException.FromLastPdfiumError("Impossibile creare un nuovo documento PDF.");
+            }
 
-        return new PdfDocument(handle, pinnedData: null);
+            return new PdfDocument(handle, pinnedData: null);
+        });
     }
 
     /// <summary>
@@ -44,14 +47,17 @@ public sealed class PdfDocument : IDisposable
         ArgumentNullException.ThrowIfNull(data);
 
         var pinned = GCHandle.Alloc(data, GCHandleType.Pinned);
-        var handle = PdfiumNative.FPDF_LoadMemDocument64(data, data.LongLength, password);
-        if (handle == IntPtr.Zero)
+        return PdfiumRuntime.Invoke(() =>
         {
-            pinned.Free();
-            throw PdfException.FromLastPdfiumError("Impossibile aprire il documento PDF.");
-        }
+            var handle = PdfiumNative.FPDF_LoadMemDocument64(data, data.LongLength, password);
+            if (handle == IntPtr.Zero)
+            {
+                pinned.Free();
+                throw PdfException.FromLastPdfiumError("Impossibile aprire il documento PDF.");
+            }
 
-        return new PdfDocument(handle, pinned);
+            return new PdfDocument(handle, pinned);
+        });
     }
 
     /// <summary>
@@ -63,20 +69,14 @@ public sealed class PdfDocument : IDisposable
         => OpenFromBytes(File.ReadAllBytes(path), password);
 
     public int PageCount
-    {
-        get
+        => PdfiumRuntime.Invoke(() =>
         {
-            lock (PdfiumRuntime.Gate)
-            {
-                ThrowIfDisposed();
-                return PdfiumNative.FPDF_GetPageCount(_handle);
-            }
-        }
-    }
+            ThrowIfDisposed();
+            return PdfiumNative.FPDF_GetPageCount(_handle);
+        });
 
     public PdfPage GetPage(int index)
-    {
-        lock (PdfiumRuntime.Gate)
+        => PdfiumRuntime.Invoke(() =>
         {
             ThrowIfDisposed();
             if (index < 0 || index >= PageCount)
@@ -91,13 +91,11 @@ public sealed class PdfDocument : IDisposable
             }
 
             return new PdfPage(pageHandle, index);
-        }
-    }
+        });
 
     /// <summary>Writes the (possibly modified) document to <paramref name="destinationPath"/>.</summary>
     public void SaveAs(string destinationPath, bool removeSecurity = false)
-    {
-        lock (PdfiumRuntime.Gate)
+        => PdfiumRuntime.Invoke(() =>
         {
             ThrowIfDisposed();
             using var stream = new FileStream(destinationPath, FileMode.Create, FileAccess.Write);
@@ -123,8 +121,7 @@ public sealed class PdfDocument : IDisposable
             {
                 throw PdfException.FromLastPdfiumError($"Impossibile salvare il documento in '{destinationPath}'.");
             }
-        }
-    }
+        });
 
     internal IntPtr Handle
     {
@@ -144,8 +141,7 @@ public sealed class PdfDocument : IDisposable
     }
 
     public void Dispose()
-    {
-        lock (PdfiumRuntime.Gate)
+        => PdfiumRuntime.Invoke(() =>
         {
             if (_disposed)
             {
@@ -159,6 +155,5 @@ public sealed class PdfDocument : IDisposable
             }
 
             _disposed = true;
-        }
-    }
+        });
 }

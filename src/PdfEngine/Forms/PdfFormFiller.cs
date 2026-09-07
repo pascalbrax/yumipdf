@@ -17,7 +17,10 @@ public enum PdfFormFieldType
 }
 
 /// <param name="IsChecked">Only meaningful for <see cref="PdfFormFieldType.CheckBox"/>/<see cref="PdfFormFieldType.RadioButton"/> - <c>false</c> for every other type.</param>
-public sealed record PdfFormField(int PageIndex, int AnnotIndex, string Name, PdfFormFieldType Type, string Value, bool IsChecked);
+/// <param name="RectLeft">Widget rectangle in PDF points (1/72 inch, origin bottom-left of the page) - lets a caller draw an on-page overlay (highlight frame, in-place editor) at the field's exact position.</param>
+public sealed record PdfFormField(
+    int PageIndex, int AnnotIndex, string Name, PdfFormFieldType Type, string Value, bool IsChecked,
+    float RectLeft, float RectBottom, float RectRight, float RectTop);
 
 /// <summary>
 /// AcroForm field read/write access. Reading field values/names only requires a form-fill
@@ -56,12 +59,12 @@ public sealed class PdfFormFiller : IDisposable
     private readonly PdfiumNative.FFI_ExecuteNamedActionDelegate _executeNamedAction = (_, _) => { };
     private readonly PdfiumNative.FFI_GetPageDelegate _getPage;
 
-    // Set immediately before an interactive operation (SetFieldValue/SetChecked) so the
-    // FFI_GetPage callback above can answer PDFium if it asks for "the page at this index"
-    // mid-operation - both operations only ever touch one page at a time, so this simple
-    // single-slot cache (instead of tracking every page the caller has ever opened) is enough.
-    private IntPtr _activePageHandle = IntPtr.Zero;
-    private int _activePageIndex = -1;
+    // The one page currently under FORM_OnAfterLoadPage, kept open (not closed and reopened
+    // for every single field edit) so the FFI_GetPage callback above can answer PDFium if it
+    // asks for "the page at this index" mid-operation - see EnsurePageOpen's remarks for why
+    // this single-slot cache exists at all, not just a plain "open, use, close" per call.
+    private PdfPage? _openPage;
+    private int _openPageIndex = -1;
 
     public PdfFormFiller(PdfDocument document)
     {
@@ -80,10 +83,7 @@ public sealed class PdfFormFiller : IDisposable
             FFI_ExecuteNamedAction = Marshal.GetFunctionPointerForDelegate(_executeNamedAction),
         };
 
-        lock (PdfiumRuntime.Gate)
-        {
-            _formHandle = PdfiumNative.FPDFDOC_InitFormFillEnvironment(document.Handle, ref _formInfo);
-        }
+        _formHandle = PdfiumRuntime.Invoke(() => PdfiumNative.FPDFDOC_InitFormFillEnvironment(document.Handle, ref _formInfo));
 
         if (_formHandle == IntPtr.Zero)
         {
@@ -92,13 +92,60 @@ public sealed class PdfFormFiller : IDisposable
     }
 
     private IntPtr GetPageCallback(IntPtr pThis, IntPtr document, int pageIndex)
-        => pageIndex == _activePageIndex ? _activePageHandle : IntPtr.Zero;
+        => pageIndex == _openPageIndex ? _openPage?.Handle ?? IntPtr.Zero : IntPtr.Zero;
+
+    /// <summary>
+    /// Makes <paramref name="pageIndex"/> the one page under <c>FORM_OnAfterLoadPage</c>,
+    /// reusing the already-open page-view if it is already this same page.
+    /// </summary>
+    /// <remarks>
+    /// Every render/edit call used to open (<c>FPDF_LoadPage</c>) and close
+    /// (<c>FPDF_ClosePage</c>) its own page handle, tearing down and rebuilding PDFium's
+    /// internal page-view every single time - including right after a field on that page had
+    /// just been focused and edited. That repeated churn corrupted the native heap
+    /// (<c>System.ExecutionEngineException</c>, no managed stack) - confirmed via crash dumps
+    /// captured while testing live against a real form: the app first died after 2-3 fields,
+    /// and even after fusing one edit's own edit+render into a single page-view lifecycle (see
+    /// <see cref="RunOnFieldAnnotAndRender"/>'s remarks) it still eventually died a few fields
+    /// later, from the *next* field's edit reopening the page fresh. Keeping the page-view open
+    /// across consecutive operations on the same page - closing it only when the caller
+    /// actually moves to a different page, or on <see cref="Dispose"/> - removes that churn
+    /// instead of just reducing it.
+    /// </remarks>
+    private PdfPage EnsurePageOpen(int pageIndex)
+    {
+        if (_openPage is not null && _openPageIndex == pageIndex)
+        {
+            return _openPage;
+        }
+
+        ClosePage();
+
+        var page = _document.GetPage(pageIndex);
+        PdfiumNative.FORM_OnAfterLoadPage(page.Handle, _formHandle);
+        _openPage = page;
+        _openPageIndex = pageIndex;
+        return page;
+    }
+
+    private void ClosePage()
+    {
+        if (_openPage is null)
+        {
+            return;
+        }
+
+        PdfiumNative.FORM_OnBeforeClosePage(_openPage.Handle, _formHandle);
+        _openPage.Dispose();
+        _openPage = null;
+        _openPageIndex = -1;
+    }
 
     /// <summary>
     /// Renders a page the same way <see cref="PdfPage.RenderToBgra"/> does, but additionally
     /// overlays the live interactive form-fill state (<c>FPDF_FFLDraw</c>). Use this instead
     /// of <see cref="PdfPage.RenderToBgra"/> whenever a <see cref="PdfFormFiller"/> is open on
-    /// the document, so a value just changed via <see cref="SetFieldValue"/>/<see cref="SetChecked"/>
+    /// the document, so a value just changed via <see cref="SetFieldValueAndRender"/>/<see cref="SetCheckedAndRender"/>
     /// (and not yet flattened) actually shows up - plain <c>FPDF_RenderPageBitmap</c> only
     /// paints each widget's last-generated appearance stream, which a value change does not
     /// regenerate on its own.
@@ -106,24 +153,11 @@ public sealed class PdfFormFiller : IDisposable
     public byte[] RenderPageToBgra(int pageIndex, int pixelWidth, int pixelHeight)
     {
         ThrowIfDisposed();
-        lock (PdfiumRuntime.Gate)
+        return PdfiumRuntime.Invoke(() =>
         {
-            using var page = _document.GetPage(pageIndex);
-
-            // Same requirement as the interactive calls in RunOnFieldAnnot: FPDF_FFLDraw
-            // needs PDFium's internal page-view state for this exact page handle, not just
-            // the one that existed (and was torn down again) while the field was being
-            // edited.
-            PdfiumNative.FORM_OnAfterLoadPage(page.Handle, _formHandle);
-            try
-            {
-                return page.RenderWithFormOverlay(pixelWidth, pixelHeight, _formHandle);
-            }
-            finally
-            {
-                PdfiumNative.FORM_OnBeforeClosePage(page.Handle, _formHandle);
-            }
-        }
+            var page = EnsurePageOpen(pageIndex);
+            return page.RenderWithFormOverlay(pixelWidth, pixelHeight, _formHandle);
+        });
     }
 
     /// <summary>Enumerates AcroForm widget fields across every page.</summary>
@@ -132,7 +166,7 @@ public sealed class PdfFormFiller : IDisposable
         ThrowIfDisposed();
         var fields = new List<PdfFormField>();
 
-        lock (PdfiumRuntime.Gate)
+        PdfiumRuntime.Invoke(() =>
         {
             for (var pageIndex = 0; pageIndex < _document.PageCount; pageIndex++)
             {
@@ -160,7 +194,12 @@ public sealed class PdfFormFiller : IDisposable
                         var isChecked = type is PdfFormFieldType.CheckBox or PdfFormFieldType.RadioButton
                             && PdfiumNative.FPDFAnnot_IsChecked(_formHandle, annot);
 
-                        fields.Add(new PdfFormField(pageIndex, annotIndex, name, type, value, isChecked));
+                        var rect = new PdfiumNative.FS_RECTF();
+                        PdfiumNative.FPDFAnnot_GetRect(annot, ref rect);
+
+                        fields.Add(new PdfFormField(
+                            pageIndex, annotIndex, name, type, value, isChecked,
+                            rect.Left, rect.Bottom, rect.Right, rect.Top));
                     }
                     finally
                     {
@@ -168,7 +207,7 @@ public sealed class PdfFormFiller : IDisposable
                     }
                 }
             }
-        }
+        });
 
         return fields;
     }
@@ -176,9 +215,11 @@ public sealed class PdfFormFiller : IDisposable
     /// <summary>
     /// Sets the text of a <see cref="PdfFormFieldType.Text"/> field (focus, select-all,
     /// replace-selection, then kill focus to commit the value - the same sequence a user
-    /// tabbing in, retyping, and tabbing back out would produce).
+    /// tabbing in, retyping, and tabbing back out would produce) and immediately renders the
+    /// page's new state - see <see cref="RunOnFieldAnnotAndRender"/> for why the render has to
+    /// happen in the same call rather than as a separate follow-up render.
     /// </summary>
-    public void SetFieldValue(PdfFormField field, string newValue)
+    public byte[] SetFieldValueAndRender(PdfFormField field, string newValue, int pixelWidth, int pixelHeight)
     {
         ArgumentNullException.ThrowIfNull(field);
         ArgumentNullException.ThrowIfNull(newValue);
@@ -187,10 +228,10 @@ public sealed class PdfFormFiller : IDisposable
         if (field.Type != PdfFormFieldType.Text)
         {
             throw new NotSupportedException(
-                $"SetFieldValue supporta solo campi di testo. Il campo '{field.Name}' è di tipo {field.Type}: usare SetChecked per CheckBox/RadioButton.");
+                $"SetFieldValueAndRender supporta solo campi di testo. Il campo '{field.Name}' è di tipo {field.Type}: usare SetCheckedAndRender per CheckBox/RadioButton.");
         }
 
-        RunOnFieldAnnot(field, (page, annot) =>
+        return RunOnFieldAnnotAndRender(field, pixelWidth, pixelHeight, (page, annot) =>
         {
             if (!PdfiumNative.FORM_SetFocusedAnnot(_formHandle, annot))
             {
@@ -206,11 +247,12 @@ public sealed class PdfFormFiller : IDisposable
     /// <summary>
     /// Checks/unchecks a <see cref="PdfFormFieldType.CheckBox"/> or selects a
     /// <see cref="PdfFormFieldType.RadioButton"/> (pass <c>true</c>) by simulating a mouse
-    /// click at the center of the widget's own rectangle - see the type-level remarks for why.
-    /// A no-op if the field is already in the requested state (clicking an already-checked
-    /// checkbox would otherwise toggle it back off).
+    /// click at the center of the widget's own rectangle - see the type-level remarks for why -
+    /// and immediately renders the page's new state (see <see cref="RunOnFieldAnnotAndRender"/>).
+    /// A no-op edit (but still rendered) if the field is already in the requested state
+    /// (clicking an already-checked checkbox would otherwise toggle it back off).
     /// </summary>
-    public void SetChecked(PdfFormField field, bool isChecked)
+    public byte[] SetCheckedAndRender(PdfFormField field, bool isChecked, int pixelWidth, int pixelHeight)
     {
         ArgumentNullException.ThrowIfNull(field);
         ThrowIfDisposed();
@@ -218,10 +260,10 @@ public sealed class PdfFormFiller : IDisposable
         if (field.Type is not (PdfFormFieldType.CheckBox or PdfFormFieldType.RadioButton))
         {
             throw new NotSupportedException(
-                $"SetChecked supporta solo CheckBox/RadioButton. Il campo '{field.Name}' è di tipo {field.Type}: usare SetFieldValue per i campi di testo.");
+                $"SetCheckedAndRender supporta solo CheckBox/RadioButton. Il campo '{field.Name}' è di tipo {field.Type}: usare SetFieldValueAndRender per i campi di testo.");
         }
 
-        RunOnFieldAnnot(field, (page, annot) =>
+        return RunOnFieldAnnotAndRender(field, pixelWidth, pixelHeight, (page, annot) =>
         {
             if (PdfiumNative.FPDFAnnot_IsChecked(_formHandle, annot) == isChecked)
             {
@@ -242,46 +284,50 @@ public sealed class PdfFormFiller : IDisposable
         });
     }
 
-    /// <summary>Opens the field's page/annotation, points the FFI_GetPage callback at it, runs <paramref name="action"/>, then cleans up - shared by <see cref="SetFieldValue"/> and <see cref="SetChecked"/>.</summary>
-    private void RunOnFieldAnnot(PdfFormField field, Action<IntPtr, IntPtr> action)
-    {
-        lock (PdfiumRuntime.Gate)
+    /// <summary>
+    /// Opens (or reuses - see <see cref="EnsurePageOpen"/>) the field's page, runs
+    /// <paramref name="edit"/> on its annotation, then renders the result - shared by
+    /// <see cref="SetFieldValueAndRender"/> and <see cref="SetCheckedAndRender"/>.
+    /// </summary>
+    /// <remarks>
+    /// The edit and the render used to be two separate calls, each opening (<c>FPDF_LoadPage</c>)
+    /// and closing (<c>FPDF_ClosePage</c>) its own page handle around its own
+    /// <c>FORM_OnAfterLoadPage</c>/<c>FORM_OnBeforeClosePage</c> pair for the same page index -
+    /// editing a field, tearing down that page-view, then immediately rebuilding a fresh one
+    /// just to render. That tear-down/rebuild was not safe: PDFium's interactive form layer
+    /// keeps state (e.g. the just-focused annotation <c>FORM_ForceToKillFocus</c> is supposed
+    /// to have cleared) tied to the specific page-view instance, and closing it out from under
+    /// a field that had just been focused corrupted the native heap - confirmed via a crash
+    /// dump (<c>System.ExecutionEngineException</c>, no managed stack, on a thread sitting
+    /// inside <c>FORM_SetFocusedAnnot</c> for the *next* field edit) when this was tested live
+    /// against a real form. Fusing one edit's own edit+render into a single page-view lifecycle
+    /// helped but did not fully fix it - the app still died a few fields later, from the next
+    /// field's edit reopening the page fresh again. Routing through the shared
+    /// <see cref="EnsurePageOpen"/> cache instead of opening/closing here directly removes that
+    /// reopen entirely for consecutive edits on the same page.
+    /// </remarks>
+    private byte[] RunOnFieldAnnotAndRender(PdfFormField field, int pixelWidth, int pixelHeight, Action<IntPtr, IntPtr> edit)
+        => PdfiumRuntime.Invoke(() =>
         {
-            using var page = _document.GetPage(field.PageIndex);
-            _activePageHandle = page.Handle;
-            _activePageIndex = field.PageIndex;
+            var page = EnsurePageOpen(field.PageIndex);
 
-            // Required before any interactive form call (FORM_SetFocusedAnnot,
-            // FORM_OnLButtonDown/Up, ...): it creates PDFium's internal page-view state for
-            // this page. Without it those calls fail cleanly (return false) rather than
-            // crash, but they do fail - confirmed while testing this against a real form PDF.
-            PdfiumNative.FORM_OnAfterLoadPage(page.Handle, _formHandle);
+            var annot = PdfiumNative.FPDFPage_GetAnnot(page.Handle, field.AnnotIndex);
+            if (annot == IntPtr.Zero)
+            {
+                throw new PdfException(PdfErrorCode.Unknown, $"Impossibile trovare l'annotazione per il campo '{field.Name}'.");
+            }
 
             try
             {
-                var annot = PdfiumNative.FPDFPage_GetAnnot(page.Handle, field.AnnotIndex);
-                if (annot == IntPtr.Zero)
-                {
-                    throw new PdfException(PdfErrorCode.Unknown, $"Impossibile trovare l'annotazione per il campo '{field.Name}'.");
-                }
-
-                try
-                {
-                    action(page.Handle, annot);
-                }
-                finally
-                {
-                    PdfiumNative.FPDFPage_CloseAnnot(annot);
-                }
+                edit(page.Handle, annot);
             }
             finally
             {
-                PdfiumNative.FORM_OnBeforeClosePage(page.Handle, _formHandle);
-                _activePageHandle = IntPtr.Zero;
-                _activePageIndex = -1;
+                PdfiumNative.FPDFPage_CloseAnnot(annot);
             }
-        }
-    }
+
+            return page.RenderWithFormOverlay(pixelWidth, pixelHeight, _formHandle);
+        });
 
     /// <summary>Two-pass PDFium string read: first call with a null buffer to get the required byte length (UTF-16LE, NUL-terminated).</summary>
     private static string ReadUtf16String(Func<byte[]?, uint, uint> reader)
@@ -307,16 +353,15 @@ public sealed class PdfFormFiller : IDisposable
     }
 
     public void Dispose()
-    {
-        lock (PdfiumRuntime.Gate)
+        => PdfiumRuntime.Invoke(() =>
         {
             if (_disposed)
             {
                 return;
             }
 
+            ClosePage();
             PdfiumNative.FPDFDOC_ExitFormFillEnvironment(_formHandle);
             _disposed = true;
-        }
-    }
+        });
 }

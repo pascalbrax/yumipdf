@@ -18,7 +18,7 @@ public static class PdfAnnotationService
     {
         ArgumentNullException.ThrowIfNull(page);
 
-        lock (PdfiumRuntime.Gate)
+        PdfiumRuntime.Invoke(() =>
         {
             var annot = PdfiumNative.FPDFPage_CreateAnnot(page.Handle, PdfiumNative.FPDF_ANNOTATION_SUBTYPE.HIGHLIGHT);
             if (annot == IntPtr.Zero)
@@ -61,7 +61,7 @@ public static class PdfAnnotationService
             {
                 PdfiumNative.FPDFPage_CloseAnnot(annot);
             }
-        }
+        });
     }
 
     // TODO(roadmap M2): note/free-text, ink (disegno a mano libera) e stamp seguono lo

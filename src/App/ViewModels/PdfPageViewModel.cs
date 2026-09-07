@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using Microsoft.UI.Xaml.Media.Imaging;
 
@@ -37,11 +38,25 @@ public partial class PdfPageViewModel : ObservableObject
     [ObservableProperty]
     public partial WriteableBitmap? Bitmap { get; set; }
 
-    /// <summary>Rescales the page's on-screen size to a new zoom level. Does not touch <see cref="Bitmap"/>.</summary>
+    /// <summary>
+    /// Editable/checkable AcroForm fields on this page (populated once, when the page is
+    /// first created - see <c>MainViewModel.RunRenderAsync</c>), drawn as an in-place overlay
+    /// on top of <see cref="Bitmap"/> so the user can type/click directly on the page instead
+    /// of only through the side "Compila modulo" panel. Read-only field types are not
+    /// included (nothing to overlay). Empty for documents/pages with no form.
+    /// </summary>
+    public ObservableCollection<FormFieldEntryViewModel> Fields { get; } = new();
+
+    /// <summary>Rescales the page's on-screen size (and every field overlay's position) to a new zoom level. Does not touch <see cref="Bitmap"/>.</summary>
     public void Resize(double zoom)
     {
         PixelWidth = ToPixels(PointWidth, zoom);
         PixelHeight = ToPixels(PointHeight, zoom);
+
+        foreach (var field in Fields)
+        {
+            field.UpdateOverlay(zoom, PointHeight);
+        }
     }
 
     private static double ToPixels(double points, double zoom) => Math.Max(1, points * zoom);
