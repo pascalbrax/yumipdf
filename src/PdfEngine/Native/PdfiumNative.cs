@@ -187,12 +187,35 @@ internal static class PdfiumNative
         public float X1, Y1, X2, Y2, X3, Y3, X4, Y4;
     }
 
-    // ---- fpdf_formfill.h : AcroForm field read access -----------------------------------
-    // NOTE: FPDF_FORMFILLINFO's exact field layout must be re-verified against the vendored
-    // public/fpdf_formfill.h for the exact bblanchon.PDFium.Win32 version this project
-    // references before relying on interactive form filling in production - a mismatched
-    // struct layout corrupts the native call stack instead of failing to compile.
-    // See docs/ARCHITECTURE.md "AcroForm filling" for the verification checklist.
+    // ---- fpdf_formfill.h : AcroForm field access ------------------------------------------
+    // NOTE: FPDF_FORMFILLINFO's field layout below was verified against the actual vendored
+    // public/fpdf_formfill.h header for bblanchon.PDFium.Win32 153.0.7999 (downloaded from
+    // the matching pdfium-binaries GitHub release) - re-verify against that package's real
+    // header again if its version ever changes; a mismatched struct layout corrupts the
+    // native call stack instead of failing to compile. See docs/ARCHITECTURE.md "AcroForm
+    // filling" for details and the verification method.
+
+    // Callback delegate shapes actually wired up by PdfFormFiller (the "Implementation
+    // Required: yes" callbacks for version 1, per the header's per-field comments - the rest
+    // are documented as not required, or "Unused", and are left null).
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    public delegate void FFI_InvalidateDelegate(
+        IntPtr pThis, IntPtr page, double left, double top, double right, double bottom);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    public delegate void FFI_SetCursorDelegate(IntPtr pThis, int nCursorType);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    public delegate int FFI_SetTimerDelegate(IntPtr pThis, int uElapse, IntPtr lpTimerFunc);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    public delegate void FFI_KillTimerDelegate(IntPtr pThis, int nTimerID);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    public delegate IntPtr FFI_GetPageDelegate(IntPtr pThis, IntPtr document, int nPageIndex);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    public delegate void FFI_ExecuteNamedActionDelegate(IntPtr pThis, IntPtr namedAction);
     [StructLayout(LayoutKind.Sequential)]
     public struct FPDF_FORMFILLINFO
     {
@@ -213,6 +236,12 @@ internal static class PdfiumNative
         public IntPtr FFI_DoURIAction;
         public IntPtr FFI_DoGoToAction;
         public IntPtr m_pJsPlatform;
+
+        // Version 2 - experimental (ignored by PDFium when version == 1, which is what this
+        // project uses, but included for an exact layout match with the real
+        // public/fpdf_formfill.h - verified against the bblanchon.PDFium.Win32 153.0.7999
+        // headers; re-check this block if that package version ever changes).
+        public int xfa_disabled;
         public IntPtr FFI_DisplayCaret;
         public IntPtr FFI_GetCurrentPageIndex;
         public IntPtr FFI_SetCurrentPage;
@@ -256,11 +285,42 @@ internal static class PdfiumNative
     public static extern bool FORM_SelectAllText(IntPtr formHandle, IntPtr page);
 
     [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
-    public static extern bool FORM_ReplaceSelection(IntPtr formHandle, IntPtr page, [MarshalAs(UnmanagedType.LPWStr)] string text);
+    public static extern void FORM_ReplaceSelection(IntPtr formHandle, IntPtr page, [MarshalAs(UnmanagedType.LPWStr)] string text);
 
     [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
     public static extern void FORM_OnAfterLoadPage(IntPtr page, IntPtr formHandle);
 
     [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
     public static extern void FORM_OnBeforeClosePage(IntPtr page, IntPtr formHandle);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern bool FORM_ForceToKillFocus(IntPtr formHandle);
+
+    // Checkbox/radio have no direct setter in the PDFium C API - the documented way to
+    // change them is to simulate the mouse click a real user would make (PDFium's internal
+    // AcroForm widget handling takes care of toggling the checked state, and - for radio
+    // buttons - unchecking any sibling in the same group).
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern bool FORM_OnLButtonDown(IntPtr formHandle, IntPtr page, int modifier, double pageX, double pageY);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern bool FORM_OnLButtonUp(IntPtr formHandle, IntPtr page, int modifier, double pageX, double pageY);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern bool FPDFAnnot_GetRect(IntPtr annot, ref FS_RECTF rect);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern bool FPDFAnnot_IsChecked(IntPtr formHandle, IntPtr annot);
+
+    // ---- fpdf_flatten.h : flatten annotations/form fields into page content --------------
+
+    public const int FLAT_NORMALDISPLAY = 0;
+    public const int FLAT_PRINT = 1;
+
+    public const int FLATTEN_FAIL = 0;
+    public const int FLATTEN_SUCCESS = 1;
+    public const int FLATTEN_NOTHINGTODO = 2;
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern int FPDFPage_Flatten(IntPtr page, int nFlag);
 }

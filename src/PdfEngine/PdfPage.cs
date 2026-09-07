@@ -80,6 +80,32 @@ public sealed class PdfPage : IDisposable
         return buffer;
     }
 
+    /// <summary>
+    /// Draws this page's annotations and form field appearances directly into the page
+    /// content and removes them as separate objects - the values a user (or
+    /// <see cref="Forms.PdfFormFiller"/>) set become permanent, non-interactive page content.
+    /// Typically the last step before <see cref="PdfDocument.SaveAs"/> when delivering a
+    /// filled-in form. Does not require a form-fill environment - it operates directly on
+    /// the page's own annotation appearance streams.
+    /// </summary>
+    /// <param name="forPrint">Selects the print-oriented vs. normal-display appearance where a field has both.</param>
+    /// <returns><c>false</c> if there was nothing to flatten (e.g. no annotations/form fields on the page) - not an error.</returns>
+    public bool Flatten(bool forPrint = false)
+    {
+        lock (PdfiumRuntime.Gate)
+        {
+            ThrowIfDisposed();
+            var flag = forPrint ? PdfiumNative.FLAT_PRINT : PdfiumNative.FLAT_NORMALDISPLAY;
+            var result = PdfiumNative.FPDFPage_Flatten(_handle, flag);
+            return result switch
+            {
+                PdfiumNative.FLATTEN_SUCCESS => true,
+                PdfiumNative.FLATTEN_NOTHINGTODO => false,
+                _ => throw new PdfException(PdfErrorCode.Unknown, $"Impossibile appiattire la pagina {Index}."),
+            };
+        }
+    }
+
     internal IntPtr Handle
     {
         get

@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using System.Text;
 using PdfEngine.Native;
 
@@ -18,17 +19,22 @@ public enum PdfFormFieldType
 public sealed record PdfFormField(int PageIndex, int AnnotIndex, string Name, PdfFormFieldType Type, string Value);
 
 /// <summary>
-/// AcroForm field access. Reading field values/names only requires a form-fill environment
-/// handle, not page rendering, so <see cref="ListFields"/> is safe to call with a minimally
-/// initialized <c>FPDF_FORMFILLINFO</c> (see <see cref="PdfiumNative.FPDF_FORMFILLINFO"/>).
+/// AcroForm field read/write access. Reading field values/names only requires a form-fill
+/// environment handle, not page rendering, so <see cref="ListFields"/> works with the same
+/// environment as the write path below.
 /// </summary>
 /// <remarks>
-/// Writing field values (<c>FORM_SetFocusedAnnot</c> + <c>FORM_ReplaceSelection</c>) goes
-/// through PDFium's interactive path, which calls back into <c>FFI_Invalidate</c> and
-/// related redraw hooks. Wiring those up needs the exact, version-matched
-/// <c>FPDF_FORMFILLINFO</c> layout to avoid corrupting the native call stack, so it is
-/// intentionally deferred to roadmap milestone M2 (see docs/ROADMAP.md) rather than shipped
-/// half-verified here - see <see cref="SetFieldValue"/>.
+/// PDFium has no direct "set field value" call - writing goes through the same interactive
+/// path a real user driving the mouse/keyboard would: <see cref="SetFieldValue"/> focuses the
+/// field's widget then selects-all-and-replaces its text; <see cref="SetChecked"/> simulates
+/// a mouse click on the widget's own rectangle, letting PDFium's internal AcroForm handling
+/// toggle it (and, for radio buttons, uncheck any sibling in the same group). Both need a
+/// <c>FPDF_FORMFILLINFO</c> with real callbacks wired up (not the null stand-ins a read-only
+/// environment can get away with), because this path calls back into <c>FFI_Invalidate</c>
+/// and friends. The exact struct layout and which callbacks are actually required was
+/// verified against the real <c>public/fpdf_formfill.h</c> for the exact
+/// <c>bblanchon.PDFium.Win32</c> version this project references (see
+/// docs/ARCHITECTURE.md "AcroForm filling") - re-verify there if that package version changes.
 /// </remarks>
 public sealed class PdfFormFiller : IDisposable
 {
@@ -37,15 +43,42 @@ public sealed class PdfFormFiller : IDisposable
     private readonly IntPtr _formHandle;
     private bool _disposed;
 
+    // Kept alive for the lifetime of this instance: once converted to a function pointer via
+    // Marshal.GetFunctionPointerForDelegate, the delegate object itself must not be
+    // GC'd for as long as native code might still call through that pointer (the struct
+    // holding the pointers must anyway remain valid until FPDFDOC_ExitFormFillEnvironment,
+    // per the header's own contract on FPDFDOC_InitFormFillEnvironment).
+    private readonly PdfiumNative.FFI_InvalidateDelegate _invalidate = (_, _, _, _, _, _) => { };
+    private readonly PdfiumNative.FFI_SetCursorDelegate _setCursor = (_, _) => { };
+    private readonly PdfiumNative.FFI_SetTimerDelegate _setTimer = (_, _, _) => 1;
+    private readonly PdfiumNative.FFI_KillTimerDelegate _killTimer = (_, _) => { };
+    private readonly PdfiumNative.FFI_ExecuteNamedActionDelegate _executeNamedAction = (_, _) => { };
+    private readonly PdfiumNative.FFI_GetPageDelegate _getPage;
+
+    // Set immediately before an interactive operation (SetFieldValue/SetChecked) so the
+    // FFI_GetPage callback above can answer PDFium if it asks for "the page at this index"
+    // mid-operation - both operations only ever touch one page at a time, so this simple
+    // single-slot cache (instead of tracking every page the caller has ever opened) is enough.
+    private IntPtr _activePageHandle = IntPtr.Zero;
+    private int _activePageIndex = -1;
+
     public PdfFormFiller(PdfDocument document)
     {
         _document = document ?? throw new ArgumentNullException(nameof(document));
+        _getPage = GetPageCallback;
 
-        // Non-XFA builds (bblanchon.PDFium.Win32) require version = 1. All callbacks are
-        // left null: safe for the read-only field-enumeration path below, which never
-        // triggers PDFium's interactive/redraw callbacks. Do not call FORM_OnAfterLoadPage,
-        // FPDF_FFLDraw, or any FORM_* interaction API against this handle.
-        _formInfo = new PdfiumNative.FPDF_FORMFILLINFO { version = 1 };
+        // Non-XFA builds (bblanchon.PDFium.Win32) require version = 1.
+        _formInfo = new PdfiumNative.FPDF_FORMFILLINFO
+        {
+            version = 1,
+            FFI_Invalidate = Marshal.GetFunctionPointerForDelegate(_invalidate),
+            FFI_SetCursor = Marshal.GetFunctionPointerForDelegate(_setCursor),
+            FFI_SetTimer = Marshal.GetFunctionPointerForDelegate(_setTimer),
+            FFI_KillTimer = Marshal.GetFunctionPointerForDelegate(_killTimer),
+            FFI_GetPage = Marshal.GetFunctionPointerForDelegate(_getPage),
+            FFI_ExecuteNamedAction = Marshal.GetFunctionPointerForDelegate(_executeNamedAction),
+        };
+
         lock (PdfiumRuntime.Gate)
         {
             _formHandle = PdfiumNative.FPDFDOC_InitFormFillEnvironment(document.Handle, ref _formInfo);
@@ -56,6 +89,9 @@ public sealed class PdfFormFiller : IDisposable
             throw new PdfException(PdfErrorCode.Unknown, "Impossibile inizializzare l'ambiente dei moduli PDF (il documento non contiene un AcroForm?).");
         }
     }
+
+    private IntPtr GetPageCallback(IntPtr pThis, IntPtr document, int pageIndex)
+        => pageIndex == _activePageIndex ? _activePageHandle : IntPtr.Zero;
 
     /// <summary>Enumerates AcroForm widget fields across every page.</summary>
     public IReadOnlyList<PdfFormField> ListFields()
@@ -102,10 +138,115 @@ public sealed class PdfFormFiller : IDisposable
         return fields;
     }
 
-    /// <summary>Not yet implemented - see the remarks on <see cref="PdfFormFiller"/> and docs/ROADMAP.md milestone M2.</summary>
+    /// <summary>
+    /// Sets the text of a <see cref="PdfFormFieldType.Text"/> field (focus, select-all,
+    /// replace-selection, then kill focus to commit the value - the same sequence a user
+    /// tabbing in, retyping, and tabbing back out would produce).
+    /// </summary>
     public void SetFieldValue(PdfFormField field, string newValue)
-        => throw new NotSupportedException(
-            "La compilazione (scrittura) dei campi modulo è pianificata per la milestone M2: richiede il wiring completo di FPDF_FORMFILLINFO, non ancora verificato. Vedi docs/ROADMAP.md.");
+    {
+        ArgumentNullException.ThrowIfNull(field);
+        ArgumentNullException.ThrowIfNull(newValue);
+        ThrowIfDisposed();
+
+        if (field.Type != PdfFormFieldType.Text)
+        {
+            throw new NotSupportedException(
+                $"SetFieldValue supporta solo campi di testo. Il campo '{field.Name}' è di tipo {field.Type}: usare SetChecked per CheckBox/RadioButton.");
+        }
+
+        RunOnFieldAnnot(field, (page, annot) =>
+        {
+            if (!PdfiumNative.FORM_SetFocusedAnnot(_formHandle, annot))
+            {
+                throw new PdfException(PdfErrorCode.Unknown, $"Impossibile impostare il focus sul campo '{field.Name}'.");
+            }
+
+            PdfiumNative.FORM_SelectAllText(_formHandle, page);
+            PdfiumNative.FORM_ReplaceSelection(_formHandle, page, newValue);
+            PdfiumNative.FORM_ForceToKillFocus(_formHandle);
+        });
+    }
+
+    /// <summary>
+    /// Checks/unchecks a <see cref="PdfFormFieldType.CheckBox"/> or selects a
+    /// <see cref="PdfFormFieldType.RadioButton"/> (pass <c>true</c>) by simulating a mouse
+    /// click at the center of the widget's own rectangle - see the type-level remarks for why.
+    /// A no-op if the field is already in the requested state (clicking an already-checked
+    /// checkbox would otherwise toggle it back off).
+    /// </summary>
+    public void SetChecked(PdfFormField field, bool isChecked)
+    {
+        ArgumentNullException.ThrowIfNull(field);
+        ThrowIfDisposed();
+
+        if (field.Type is not (PdfFormFieldType.CheckBox or PdfFormFieldType.RadioButton))
+        {
+            throw new NotSupportedException(
+                $"SetChecked supporta solo CheckBox/RadioButton. Il campo '{field.Name}' è di tipo {field.Type}: usare SetFieldValue per i campi di testo.");
+        }
+
+        RunOnFieldAnnot(field, (page, annot) =>
+        {
+            if (PdfiumNative.FPDFAnnot_IsChecked(_formHandle, annot) == isChecked)
+            {
+                return;
+            }
+
+            var rect = new PdfiumNative.FS_RECTF();
+            if (!PdfiumNative.FPDFAnnot_GetRect(annot, ref rect))
+            {
+                throw new PdfException(PdfErrorCode.Unknown, $"Impossibile leggere l'area del campo '{field.Name}'.");
+            }
+
+            var x = (rect.Left + rect.Right) / 2.0;
+            var y = (rect.Top + rect.Bottom) / 2.0;
+
+            PdfiumNative.FORM_OnLButtonDown(_formHandle, page, 0, x, y);
+            PdfiumNative.FORM_OnLButtonUp(_formHandle, page, 0, x, y);
+        });
+    }
+
+    /// <summary>Opens the field's page/annotation, points the FFI_GetPage callback at it, runs <paramref name="action"/>, then cleans up - shared by <see cref="SetFieldValue"/> and <see cref="SetChecked"/>.</summary>
+    private void RunOnFieldAnnot(PdfFormField field, Action<IntPtr, IntPtr> action)
+    {
+        lock (PdfiumRuntime.Gate)
+        {
+            using var page = _document.GetPage(field.PageIndex);
+            _activePageHandle = page.Handle;
+            _activePageIndex = field.PageIndex;
+
+            // Required before any interactive form call (FORM_SetFocusedAnnot,
+            // FORM_OnLButtonDown/Up, ...): it creates PDFium's internal page-view state for
+            // this page. Without it those calls fail cleanly (return false) rather than
+            // crash, but they do fail - confirmed while testing this against a real form PDF.
+            PdfiumNative.FORM_OnAfterLoadPage(page.Handle, _formHandle);
+
+            try
+            {
+                var annot = PdfiumNative.FPDFPage_GetAnnot(page.Handle, field.AnnotIndex);
+                if (annot == IntPtr.Zero)
+                {
+                    throw new PdfException(PdfErrorCode.Unknown, $"Impossibile trovare l'annotazione per il campo '{field.Name}'.");
+                }
+
+                try
+                {
+                    action(page.Handle, annot);
+                }
+                finally
+                {
+                    PdfiumNative.FPDFPage_CloseAnnot(annot);
+                }
+            }
+            finally
+            {
+                PdfiumNative.FORM_OnBeforeClosePage(page.Handle, _formHandle);
+                _activePageHandle = IntPtr.Zero;
+                _activePageIndex = -1;
+            }
+        }
+    }
 
     /// <summary>Two-pass PDFium string read: first call with a null buffer to get the required byte length (UTF-16LE, NUL-terminated).</summary>
     private static string ReadUtf16String(Func<byte[]?, uint, uint> reader)

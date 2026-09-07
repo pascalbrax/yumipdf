@@ -20,11 +20,15 @@
 - [ ] Virtualizzazione reale del viewport (oggi ogni pagina viene comunque renderizzata e tenuta in memoria, solo in modo progressivo/asincrono - per documenti molto grandi serebbe da scaricare/saltare le pagine lontane dallo scroll corrente)
 
 ## M2 - Compilazione moduli (scrittura)
-- [ ] Verificare il layout di `FPDF_FORMFILLINFO` contro l'header vendorizzato nella versione esatta di `bblanchon.PDFium.Win32` in uso (vedi docs/ARCHITECTURE.md)
-- [ ] Wiring dei callback minimi richiesti per il percorso interattivo (`FFI_Invalidate`, `FFI_SetTimer`/`KillTimer`, `FFI_GetPage`) mantenendo i delegate vivi (campi `static readonly`)
-- [ ] `PdfFormFiller.SetFieldValue` per campi testo (via `FORM_SetFocusedAnnot` + `FORM_SelectAllText` + `FORM_ReplaceSelection`)
-- [ ] Checkbox/radio/combo/listbox (percorso diverso da quello testuale)
-- [ ] "Appiattimento" (flatten) del form compilato in output
+- [x] Verificato il layout di `FPDF_FORMFILLINFO` contro l'header reale scaricato dalla release GitHub di `bblanchon/pdfium-binaries` corrispondente alla versione NuGet in uso - trovati e corretti due bug (campo `xfa_disabled` mancante, `FORM_ReplaceSelection` dichiarata con reso sbagliato). Vedi docs/ARCHITECTURE.md "AcroForm filling".
+- [x] Wiring dei callback richiesti per il percorso interattivo (`FFI_Invalidate`, `FFI_SetCursor`, `FFI_SetTimer`/`KillTimer`, `FFI_GetPage`, `FFI_ExecuteNamedAction`) mantenendo i delegate vivi come campi d'istanza di `PdfFormFiller`
+- [x] `PdfFormFiller.SetFieldValue` per campi testo (via `FORM_SetFocusedAnnot` + `FORM_SelectAllText` + `FORM_ReplaceSelection`); richiede anche `FORM_OnAfterLoadPage`/`FORM_OnBeforeClosePage` attorno all'operazione (non solo per il rendering - scoperto testando dal vivo)
+- [x] Checkbox/radio (`PdfFormFiller.SetChecked`, via simulazione di click con `FORM_OnLButtonDown`/`Up` sul rettangolo del widget - nessun setter diretto esiste nell'API)
+- [x] "Appiattimento" (flatten) del form compilato in output (`PdfPage.Flatten`, `FPDFPage_Flatten`)
+- [x] Verificato end-to-end con un modulo compilabile reale (33 campi testo con caratteri accentati + 2 checkbox, salvataggio, riapertura, rendering) - vedi docs/ARCHITECTURE.md
+- [ ] Combo box (editabili) e list box - nessuna copertura ancora, il PDF di test non ne conteneva; combo editabili dovrebbero seguire lo stesso percorso testuale di `SetFieldValue`, ma non verificato
+- [ ] Fixture di test AcroForm inclusa nel repository per `PdfEngine.Tests` (oggi la verifica di scrittura è manuale contro un documento reale non incluso nel repo)
+- [ ] UI applicativa per la compilazione moduli (oggi `PdfFormFiller` è utilizzabile solo a livello di libreria, senza un pannello/dialogo nell'app per elencare e modificare i campi di un documento aperto)
 
 ## M3 - Editor / annotazioni avanzate
 - [ ] Nota/testo libero, disegno a mano libera (ink), timbro

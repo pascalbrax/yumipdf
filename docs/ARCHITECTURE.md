@@ -80,19 +80,76 @@ dell'hardware Direct3D (~16384px per lato) oltre a diventare enorme in memoria (
 `MainViewModel.ComputeMaxZoomForDocument` limita lo zoom massimo selezionabile in base alla pagina piu'
 grande del documento aperto, restando sotto una soglia di sicurezza (`SafeMaxPixelDimension`, 8192px).
 
-## AcroForm filling: attenzione al layout dello struct
+## AcroForm filling (M2): layout verificato, scrittura implementata
 
-`FPDF_FORMFILLINFO` (usato da `PdfFormFiller` per leggere nome/tipo/valore dei campi) è uno struct C con ~30
-puntatori a funzione, e PDFium usa questo struct per callback interattive (ridisegno, focus, ecc.).
-**Il layout dichiarato in `PdfiumNative.FPDF_FORMFILLINFO` deve essere riverificato contro l'header
-`public/fpdf_formfill.h` effettivamente incluso nella versione di `bblanchon.PDFium.Win32` referenziata**
-prima di usare in produzione qualunque funzionalità interattiva (focus, scrittura campi) - un layout errato
-non genera un errore di compilazione, ma corrompe lo stack nativo a runtime.
+`FPDF_FORMFILLINFO` (lo struct C con ~35 campi/puntatori a funzione che PDFium usa per le callback
+interattive - ridisegno, focus, timer, ecc.) è stato **verificato campo per campo** contro l'header reale
+`public/fpdf_formfill.h`, scaricato dalla release GitHub di `bblanchon/pdfium-binaries` che corrisponde
+esattamente alla versione referenziata (`bblanchon.PDFium.Win32` 153.0.7999 → tag `chromium/7999`).
+La verifica ha trovato e corretto due bug reali nel binding scritto "a memoria" durante lo scaffolding:
 
-Il percorso di **sola lettura** dei campi (`PdfFormFiller.ListFields()`) è stato scritto per essere sicuro con
-uno struct "quasi vuoto" (tutti i puntatori a funzione a `null`, solo `version = 1`), perché non attraversa mai
-il percorso interattivo di PDFium. La **scrittura** dei valori (`PdfFormFiller.SetFieldValue`) è deliberatamente
-non implementata in questa milestone - vedi [ROADMAP.md](ROADMAP.md) M2.
+1. Mancava il campo `xfa_disabled` (`FPDF_BOOL`, 4 byte) tra `m_pJsPlatform` e `FFI_DisplayCaret` - con
+   `version = 1` (quello usato qui) PDFium non lo legge mai, quindi non causava problemi in pratica, ma è
+   stato aggiunto comunque per un layout identico all'header a prescindere dalla versione usata.
+2. `FORM_ReplaceSelection` è dichiarata `void` nell'header, non `FPDF_BOOL` - il binding dichiarava un
+   valore di ritorno inesistente (ABI in pratica innocuo qui, ma comunque sbagliato: da correggere).
+
+**Se la versione di `bblanchon.PDFium.Win32` in `PdfEngine.csproj` cambia, questa verifica va ripetuta**:
+scaricare `https://github.com/bblanchon/pdfium-binaries/releases/download/chromium%2F<build>/pdfium-win-x64.tgz`
+(stesso `<build>` della versione NuGet, es. `153.0.7999` → `chromium/7999`), estrarre `include/fpdf_formfill.h`
+e confrontare campo per campo con `PdfiumNative.FPDF_FORMFILLINFO`.
+
+### Scrittura: nessun "setter" diretto, bisogna simulare l'interazione
+
+PDFium non espone un modo per impostare direttamente il valore di un campo: bisogna passare dallo stesso
+percorso che userebbe un utente vero.
+
+- **Campi di testo** (`PdfFormFiller.SetFieldValue`): `FORM_SetFocusedAnnot` (focus) → `FORM_SelectAllText`
+  (seleziona tutto) → `FORM_ReplaceSelection` (sostituisce con il nuovo testo) → `FORM_ForceToKillFocus`
+  (commit, come se l'utente avesse tabbato via dal campo).
+- **Checkbox/radio** (`PdfFormFiller.SetChecked`): non esiste un `FPDFAnnot_SetChecked`. Si simula un click
+  del mouse al centro del rettangolo del widget (`FPDFAnnot_GetRect` + `FORM_OnLButtonDown`/`FORM_OnLButtonUp`),
+  lasciando che la gestione interna dei widget di PDFium se ne occupi (per i radio, deseleziona
+  automaticamente gli altri pulsanti dello stesso gruppo). Se il campo è già nello stato richiesto
+  l'operazione è un no-op, altrimenti un secondo click lo farebbe scattare di nuovo (spuntando/togliendo lo
+  spunto per errore).
+
+Entrambi i percorsi **richiedono `FORM_OnAfterLoadPage`** sia stato chiamato per quella pagina prima di
+qualunque funzione `FORM_*` interattiva - non solo per il rendering come indicava un commento precedente in
+questo file: senza, `FORM_SetFocusedAnnot` fallisce in modo pulito (ritorna `false`, nessun crash) ma
+fallisce comunque. Scoperto testando dal vivo contro un PDF compilabile reale (vedi sotto).
+`PdfFormFiller.RunOnFieldAnnot` chiama `FORM_OnAfterLoadPage`/`FORM_OnBeforeClosePage` attorno a ogni
+operazione.
+
+Per questo, a differenza della sola lettura (che può usare uno struct "quasi vuoto"), la scrittura richiede
+callback native reali e non nulle: `FFI_Invalidate`, `FFI_SetCursor`, `FFI_SetTimer`/`FFI_KillTimer`,
+`FFI_GetPage`, `FFI_ExecuteNamedAction` (gli unici marcati "Implementation Required: yes" per `version = 1`
+nell'header). `PdfFormFiller` li implementa come no-op innocui (tranne `FFI_GetPage`, che deve rispondere con
+l'handle di pagina corretto: tiene un singolo "slot attivo" - pagina/indice - impostato prima di ogni
+operazione, sufficiente perché `SetFieldValue`/`SetChecked` toccano sempre una sola pagina alla volta) e li
+tiene vivi come campi d'istanza per tutta la vita di `PdfFormFiller` (i delegate convertiti in puntatori a
+funzione via `Marshal.GetFunctionPointerForDelegate` non devono essere raccolti dal GC finché PDFium può
+ancora richiamarli).
+
+### `Flatten`: rendere permanenti i valori compilati
+
+`PdfPage.Flatten()` (`FPDFPage_Flatten`, `fpdf_flatten.h`) disegna le appearance stream di annotazioni e
+widget direttamente nel contenuto della pagina e rimuove gli oggetti interattivi - tipicamente l'ultimo passo
+prima di `PdfDocument.SaveAs` quando si consegna un modulo compilato. Non richiede un ambiente di form-fill
+(opera direttamente sulle appearance stream della pagina), quindi vive su `PdfPage`, non su `PdfFormFiller`.
+
+### Verifica end-to-end
+
+L'intero percorso (apertura → `ListFields` → `SetFieldValue` su 33 campi di testo con caratteri accentati →
+`SetChecked` su una checkbox → `Flatten` → `SaveAs` → riapertura del file salvato → rendering della pagina)
+è stato verificato con un vero modulo compilabile comunale ("Notifica inizio lavori di costruzione"): tutti i
+valori risultano scritti correttamente, la checkbox spuntata, e dopo il flatten `ListFields()` sul file
+riaperto ritorna 0 campi (i widget sono stati sostituiti da contenuto di pagina statico, come atteso). I test
+automatici in `tests/PdfEngine.Tests/PdfFormFillerTests.cs` coprono l'inizializzazione dell'ambiente form e i
+percorsi di errore (tipo di campo sbagliato per `SetFieldValue`/`SetChecked`), ma non un documento AcroForm
+reale - servirebbe un PDF compilabile di dimensioni ridotte da includere nel repository come fixture di test
+(non fatto qui: il file usato per la verifica è un documento personale dell'utente, non incluso nel
+repository).
 
 ## Stampa: perché non l'API di stampa WinRT nativa
 
