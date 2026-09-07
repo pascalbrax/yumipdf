@@ -50,12 +50,40 @@ public sealed class PrintService
         };
         var nextPageIndex = firstPage - 1; // convert to 0-based
 
-        printDoc.PrintPage += (_, e) => PrintPage(e, document, ref nextPageIndex, lastPage - 1);
-        printDoc.Print();
+        // Every page's pinned pixel buffer is kept alive (not freed page-by-page) until the
+        // whole job is done - see PrintPage's remarks for why.
+        var pinnedPageBuffers = new List<GCHandle>();
+        try
+        {
+            printDoc.PrintPage += (_, e) => PrintPage(e, document, ref nextPageIndex, lastPage - 1, pinnedPageBuffers);
+            printDoc.Print();
+        }
+        finally
+        {
+            foreach (var handle in pinnedPageBuffers)
+            {
+                handle.Free();
+            }
+        }
+
         return true;
     }
 
-    private static void PrintPage(PrintPageEventArgs e, PdfDocument document, ref int nextPageIndex, int lastPageIndexInclusive)
+    /// <remarks>
+    /// A page's pinned BGRA buffer used to be freed (<c>GCHandle.Free</c>) right after the one
+    /// <c>Graphics.DrawImage</c> call that used it, inside this same method - the same pattern
+    /// that, for a PDFium-owned pointer, turned out to cause a real crash (see
+    /// <c>PdfEngine.Forms.PdfFormFiller</c>'s remarks on <c>_formInfoPtr</c>): freeing/unpinning
+    /// memory immediately after the one call that appears to consume it is only safe if that
+    /// callee is guaranteed to have fully finished with the pointer by the time the call
+    /// returns. Many printer drivers spool through EMF and don't actually rasterize a
+    /// <c>DrawImage</c> call's source bitmap until spooling happens, well after
+    /// <c>PrintPage</c> has returned - freeing the buffer that early crashed the app right
+    /// after a print job actually completed (the printed output looked fine; the buffer was
+    /// still valid long enough for whatever *did* run synchronously). Keeping every page's
+    /// buffer pinned for the whole job removes that same class of bug here too.
+    /// </remarks>
+    private static void PrintPage(PrintPageEventArgs e, PdfDocument document, ref int nextPageIndex, int lastPageIndexInclusive, List<GCHandle> pinnedPageBuffers)
     {
         if (e.Graphics is null || e.PageBounds.Width <= 0 || e.PageBounds.Height <= 0)
         {
@@ -72,16 +100,11 @@ public sealed class PrintService
         var bgra = page.RenderToBgra(pixelWidth, pixelHeight);
 
         var handle = GCHandle.Alloc(bgra, GCHandleType.Pinned);
-        try
-        {
-            var stride = pixelWidth * 4;
-            using var bitmap = new Bitmap(pixelWidth, pixelHeight, stride, PixelFormat.Format32bppRgb, handle.AddrOfPinnedObject());
-            e.Graphics.DrawImage(bitmap, e.PageBounds);
-        }
-        finally
-        {
-            handle.Free();
-        }
+        pinnedPageBuffers.Add(handle);
+
+        var stride = pixelWidth * 4;
+        using var bitmap = new Bitmap(pixelWidth, pixelHeight, stride, PixelFormat.Format32bppRgb, handle.AddrOfPinnedObject());
+        e.Graphics.DrawImage(bitmap, e.PageBounds);
 
         nextPageIndex++;
         e.HasMorePages = nextPageIndex <= lastPageIndexInclusive;
