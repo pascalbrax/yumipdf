@@ -262,7 +262,12 @@ internal static class PdfiumNative
     }
 
     [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
-    public static extern IntPtr FPDFDOC_InitFormFillEnvironment(IntPtr document, ref FPDF_FORMFILLINFO formInfo);
+    // IntPtr, not "ref FPDF_FORMFILLINFO": see PdfFormFiller's constructor remarks - PDFium
+    // keeps this pointer (as "pThis") for the lifetime of the form-fill environment, handing
+    // it back on every later callback, but a byref struct parameter is only pinned by the
+    // interop marshaler for the duration of this one call - the caller has to give it a
+    // stable, non-GC-moving (unmanaged) address of its own instead.
+    public static extern IntPtr FPDFDOC_InitFormFillEnvironment(IntPtr document, IntPtr formInfo);
 
     [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
     public static extern void FPDFDOC_ExitFormFillEnvironment(IntPtr formHandle);
@@ -285,7 +290,12 @@ internal static class PdfiumNative
     public static extern bool FORM_SelectAllText(IntPtr formHandle, IntPtr page);
 
     [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
-    public static extern void FORM_ReplaceSelection(IntPtr formHandle, IntPtr page, [MarshalAs(UnmanagedType.LPWStr)] string text);
+    // IntPtr, not a marshaled string: see PdfFormFiller.SetFieldValueAndRender's remarks - the
+    // caller passes a manually-allocated, deliberately-not-immediately-freed buffer instead of
+    // an auto-marshaled string, because PDFium reading it back after the call returns (found
+    // live, via a GC-forcing repro) means the interop marshaler's own pin-for-the-call's-
+    // duration lifetime is not long enough.
+    public static extern void FORM_ReplaceSelection(IntPtr formHandle, IntPtr page, IntPtr text);
 
     [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
     public static extern void FORM_OnAfterLoadPage(IntPtr page, IntPtr formHandle);

@@ -156,16 +156,26 @@
                                                             field rects, which got clipped against the
                                                             bottom edge of this Grid's much smaller
                                                             declared Height.
+
+                                                            Background is fully opaque, not a tint:
+                                                            the page bitmap underneath already has
+                                                            the committed value baked into it (PDFium's
+                                                            FPDF_FFLDraw, so the field still reads
+                                                            correctly with the overlay closed) - a
+                                                            translucent background let that native
+                                                            rendering show through behind this control's
+                                                            own text, doubling it up in two different
+                                                            fonts/sizes once a field had been edited.
                                                         -->
                                                         <TextBox Visibility="{x:Bind TextFieldVisibility}"
-                                                                 Background="#40FFFFFF" BorderBrush="#FF2683DB" BorderThickness="1.5"
+                                                                 Background="White" BorderBrush="#FF2683DB" BorderThickness="1.5"
                                                                  Padding="2,0" MinHeight="0" MinWidth="0" VerticalContentAlignment="Center"
                                                                  FontSize="{x:Bind OverlayFontSize, Mode=OneWay}"
                                                                  Text="{x:Bind Value, Mode=OneWay}" TextChanged="{x:Bind OnTextChanged}" LostFocus="{x:Bind CommitText}"
                                                                  ToolTipService.ToolTip="{x:Bind Name}" />
 
                                                         <Border Visibility="{x:Bind CheckableFieldVisibility}"
-                                                                Background="#40FFFFFF" BorderBrush="#FF2683DB" BorderThickness="1.5"
+                                                                Background="White" BorderBrush="#FF2683DB" BorderThickness="1.5"
                                                                 Tapped="{x:Bind OnOverlayCheckTapped}" ToolTipService.ToolTip="{x:Bind Name}">
                                                             <FontIcon Glyph="&#xE73E;" Foreground="#FF2683DB"
                                                                       FontSize="{x:Bind OverlayFontSize, Mode=OneWay}"

@@ -14,13 +14,11 @@ namespace PdfEngine;
 /// unrelated documents/pages. A plain lock around every call (this type's original design)
 /// only serializes access, it does not pin PDFium to one OS thread - and callers here always
 /// reach it via <c>Task.Run</c>, which hands each call to whatever threadpool worker happens
-/// to be free, a different one from call to call. That mismatch corrupted the native heap
-/// (<c>System.ExecutionEngineException</c> with no managed stack; separately, the same crash
-/// signature - access violation at one fixed offset inside coreclr.dll - in Windows' own
-/// Application-Error log across every repro) even after every actual page/page-view lifecycle
-/// bug found in <see cref="Forms.PdfFormFiller"/> had already been fixed - confirmed by testing
-/// live against a real form. Routing every call through one persistent thread instead of a
-/// lock removes the cross-thread migration entirely, which a lock alone cannot.
+/// to be free, a different one from call to call. Routing every call through one persistent
+/// thread instead removes that cross-thread migration, which a lock alone cannot - good
+/// practice regardless, even though the specific crash chased hardest while building this
+/// (see <see cref="Forms.PdfFormFiller"/>'s remarks on <c>_formInfoPtr</c>) turned out to be a
+/// GC-relocation bug, not a threading one.
 /// </remarks>
 public static class PdfiumRuntime
 {

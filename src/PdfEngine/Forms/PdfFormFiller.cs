@@ -29,21 +29,37 @@ public sealed record PdfFormField(
 /// </summary>
 /// <remarks>
 /// PDFium has no direct "set field value" call - writing goes through the same interactive
-/// path a real user driving the mouse/keyboard would: <see cref="SetFieldValue"/> focuses the
-/// field's widget then selects-all-and-replaces its text; <see cref="SetChecked"/> simulates
-/// a mouse click on the widget's own rectangle, letting PDFium's internal AcroForm handling
-/// toggle it (and, for radio buttons, uncheck any sibling in the same group). Both need a
-/// <c>FPDF_FORMFILLINFO</c> with real callbacks wired up (not the null stand-ins a read-only
-/// environment can get away with), because this path calls back into <c>FFI_Invalidate</c>
-/// and friends. The exact struct layout and which callbacks are actually required was
-/// verified against the real <c>public/fpdf_formfill.h</c> for the exact
+/// path a real user driving the mouse/keyboard would: <see cref="SetFieldValueAndRender"/>
+/// focuses the field's widget then selects-all-and-replaces its text; <see cref="SetCheckedAndRender"/>
+/// simulates a mouse click on the widget's own rectangle, letting PDFium's internal AcroForm
+/// handling toggle it (and, for radio buttons, uncheck any sibling in the same group). Both
+/// need a <c>FPDF_FORMFILLINFO</c> with real callbacks wired up (not the null stand-ins a
+/// read-only environment can get away with), because this path calls back into
+/// <c>FFI_Invalidate</c> and friends. The exact struct layout and which callbacks are actually
+/// required was verified against the real <c>public/fpdf_formfill.h</c> for the exact
 /// <c>bblanchon.PDFium.Win32</c> version this project references (see
 /// docs/ARCHITECTURE.md "AcroForm filling") - re-verify there if that package version changes.
 /// </remarks>
 public sealed class PdfFormFiller : IDisposable
 {
     private readonly PdfDocument _document;
-    private PdfiumNative.FPDF_FORMFILLINFO _formInfo;
+
+    // Allocated on the unmanaged heap, not a plain struct field: PDFium keeps this address (as
+    // "pThis") for the lifetime of the form-fill environment and hands it back on every later
+    // callback - a byref/pinned struct field on a managed object is only guaranteed stable for
+    // the duration of the one P/Invoke call that passes it, and a later compacting GC is free
+    // to relocate the containing object (this PdfFormFiller instance). That relocation was
+    // confirmed as the actual root cause of a crash chased for a long time: the app reliably
+    // died a few fields into editing a real form, always inside FORM_SetFocusedAnnot. Two other
+    // real bugs (page-view churn in EnsurePageOpen, and a FORM_ReplaceSelection string only
+    // pinned for the one call in SetFieldValueAndRender) were found and fixed along the way and
+    // are worth keeping regardless, but neither explained the crash on their own - it was only
+    // forcing a GC after every edit in an isolated PdfEngine-only console repro (which otherwise
+    // never crashed across all 33 fields of a real form) that reproduced it outside the app too,
+    // pointing at GC relocation rather than anything specific to WinUI3. Allocating this struct
+    // on the unmanaged heap instead removes it from the GC's control entirely, for as long as
+    // this instance exists.
+    private readonly IntPtr _formInfoPtr;
     private readonly IntPtr _formHandle;
     private bool _disposed;
 
@@ -66,13 +82,23 @@ public sealed class PdfFormFiller : IDisposable
     private PdfPage? _openPage;
     private int _openPageIndex = -1;
 
+    // Every native string buffer handed to FORM_ReplaceSelection so far, kept alive until
+    // Dispose - see SetFieldValueAndRender's remarks for why they cannot be freed right after
+    // the call that used them.
+    private readonly List<IntPtr> _replaceSelectionBuffers = new();
+
+    // Every annotation handle opened on _openPage so far, kept open (never individually
+    // closed) until the whole page-view closes - see EnsureAnnotOpen's remarks for why this
+    // has to hold onto all of them, not just the most recently used one.
+    private readonly Dictionary<int, IntPtr> _openAnnotsByIndex = new();
+
     public PdfFormFiller(PdfDocument document)
     {
         _document = document ?? throw new ArgumentNullException(nameof(document));
         _getPage = GetPageCallback;
 
         // Non-XFA builds (bblanchon.PDFium.Win32) require version = 1.
-        _formInfo = new PdfiumNative.FPDF_FORMFILLINFO
+        var formInfo = new PdfiumNative.FPDF_FORMFILLINFO
         {
             version = 1,
             FFI_Invalidate = Marshal.GetFunctionPointerForDelegate(_invalidate),
@@ -83,10 +109,14 @@ public sealed class PdfFormFiller : IDisposable
             FFI_ExecuteNamedAction = Marshal.GetFunctionPointerForDelegate(_executeNamedAction),
         };
 
-        _formHandle = PdfiumRuntime.Invoke(() => PdfiumNative.FPDFDOC_InitFormFillEnvironment(document.Handle, ref _formInfo));
+        _formInfoPtr = Marshal.AllocHGlobal(Marshal.SizeOf<PdfiumNative.FPDF_FORMFILLINFO>());
+        Marshal.StructureToPtr(formInfo, _formInfoPtr, fDeleteOld: false);
+
+        _formHandle = PdfiumRuntime.Invoke(() => PdfiumNative.FPDFDOC_InitFormFillEnvironment(document.Handle, _formInfoPtr));
 
         if (_formHandle == IntPtr.Zero)
         {
+            Marshal.FreeHGlobal(_formInfoPtr);
             throw new PdfException(PdfErrorCode.Unknown, "Impossibile inizializzare l'ambiente dei moduli PDF (il documento non contiene un AcroForm?).");
         }
     }
@@ -102,15 +132,12 @@ public sealed class PdfFormFiller : IDisposable
     /// Every render/edit call used to open (<c>FPDF_LoadPage</c>) and close
     /// (<c>FPDF_ClosePage</c>) its own page handle, tearing down and rebuilding PDFium's
     /// internal page-view every single time - including right after a field on that page had
-    /// just been focused and edited. That repeated churn corrupted the native heap
-    /// (<c>System.ExecutionEngineException</c>, no managed stack) - confirmed via crash dumps
-    /// captured while testing live against a real form: the app first died after 2-3 fields,
-    /// and even after fusing one edit's own edit+render into a single page-view lifecycle (see
-    /// <see cref="RunOnFieldAnnotAndRender"/>'s remarks) it still eventually died a few fields
-    /// later, from the *next* field's edit reopening the page fresh. Keeping the page-view open
-    /// across consecutive operations on the same page - closing it only when the caller
-    /// actually moves to a different page, or on <see cref="Dispose"/> - removes that churn
-    /// instead of just reducing it.
+    /// just been focused and edited. That repeated churn was a real, independent bug (fixed
+    /// here), though it turned out not to be the whole story - see the type-level remarks on
+    /// <see cref="_formInfoPtr"/> for what the actual remaining crash was. Keeping the
+    /// page-view open across consecutive operations on the same page - closing it only when
+    /// the caller actually moves to a different page, or on <see cref="Dispose"/> - removes
+    /// that open/close churn.
     /// </remarks>
     private PdfPage EnsurePageOpen(int pageIndex)
     {
@@ -135,10 +162,57 @@ public sealed class PdfFormFiller : IDisposable
             return;
         }
 
+        // Every open annotation handle belongs to this page - none of them can outlive it.
+        CloseAllAnnots();
+
         PdfiumNative.FORM_OnBeforeClosePage(_openPage.Handle, _formHandle);
         _openPage.Dispose();
         _openPage = null;
         _openPageIndex = -1;
+    }
+
+    /// <summary>
+    /// Makes <paramref name="field"/>'s annotation handle open on <paramref name="page"/>,
+    /// reusing an already-open handle for it if there is one.
+    /// </summary>
+    /// <remarks>
+    /// Closing (<c>FPDFPage_CloseAnnot</c>) each field's handle - either right after editing
+    /// it, or when the caller moved on to the next field - was a real, independent bug too: a
+    /// per-native-call trace log (added to chase the crash down after the page-view fix alone
+    /// did not fully explain it) caught <c>FPDFPage_GetAnnot</c> returning the exact same
+    /// pointer value a just-closed field's handle had held, for a completely different field -
+    /// PDFium had reused that freed memory, meaning something internal was left referencing
+    /// the closed handle (that <c>FORM_ForceToKillFocus</c> evidently does not fully clear) and
+    /// then got dereferenced as if it were the new, unrelated object. Never closing a field's
+    /// annotation handle once opened - closing them all together only when the whole page-view
+    /// closes, via <see cref="CloseAllAnnots"/> - removes that reuse. See the type-level
+    /// remarks on <see cref="_formInfoPtr"/> for the deeper bug this one was standing in front of.
+    /// </remarks>
+    private IntPtr EnsureAnnotOpen(PdfPage page, PdfFormField field)
+    {
+        if (_openAnnotsByIndex.TryGetValue(field.AnnotIndex, out var existing))
+        {
+            return existing;
+        }
+
+        var annot = PdfiumNative.FPDFPage_GetAnnot(page.Handle, field.AnnotIndex);
+        if (annot == IntPtr.Zero)
+        {
+            throw new PdfException(PdfErrorCode.Unknown, $"Impossibile trovare l'annotazione per il campo '{field.Name}'.");
+        }
+
+        _openAnnotsByIndex[field.AnnotIndex] = annot;
+        return annot;
+    }
+
+    private void CloseAllAnnots()
+    {
+        foreach (var annot in _openAnnotsByIndex.Values)
+        {
+            PdfiumNative.FPDFPage_CloseAnnot(annot);
+        }
+
+        _openAnnotsByIndex.Clear();
     }
 
     /// <summary>
@@ -219,6 +293,16 @@ public sealed class PdfFormFiller : IDisposable
     /// page's new state - see <see cref="RunOnFieldAnnotAndRender"/> for why the render has to
     /// happen in the same call rather than as a separate follow-up render.
     /// </summary>
+    /// <remarks>
+    /// <c>newValue</c> is copied into a manually-allocated native buffer (kept alive, not freed,
+    /// until this instance is disposed) instead of being passed as an auto-marshaled
+    /// <c>[MarshalAs(LPWStr)] string</c>: the interop marshaler only pins a string argument for
+    /// the duration of the one P/Invoke call, and there was no way to be sure PDFium never reads
+    /// this pointer back afterwards. That turned out to be a real, independent bug worth fixing
+    /// regardless, though - like the page-view and annotation-handle lifetime fixes elsewhere in
+    /// this type - it was not the actual root cause of the crash this file's remarks describe;
+    /// see <see cref="_formInfoPtr"/>'s remarks for that.
+    /// </remarks>
     public byte[] SetFieldValueAndRender(PdfFormField field, string newValue, int pixelWidth, int pixelHeight)
     {
         ArgumentNullException.ThrowIfNull(field);
@@ -239,7 +323,10 @@ public sealed class PdfFormFiller : IDisposable
             }
 
             PdfiumNative.FORM_SelectAllText(_formHandle, page);
-            PdfiumNative.FORM_ReplaceSelection(_formHandle, page, newValue);
+
+            var textBuffer = Marshal.StringToHGlobalUni(newValue);
+            _replaceSelectionBuffers.Add(textBuffer);
+            PdfiumNative.FORM_ReplaceSelection(_formHandle, page, textBuffer);
             PdfiumNative.FORM_ForceToKillFocus(_formHandle);
         });
     }
@@ -289,42 +376,13 @@ public sealed class PdfFormFiller : IDisposable
     /// <paramref name="edit"/> on its annotation, then renders the result - shared by
     /// <see cref="SetFieldValueAndRender"/> and <see cref="SetCheckedAndRender"/>.
     /// </summary>
-    /// <remarks>
-    /// The edit and the render used to be two separate calls, each opening (<c>FPDF_LoadPage</c>)
-    /// and closing (<c>FPDF_ClosePage</c>) its own page handle around its own
-    /// <c>FORM_OnAfterLoadPage</c>/<c>FORM_OnBeforeClosePage</c> pair for the same page index -
-    /// editing a field, tearing down that page-view, then immediately rebuilding a fresh one
-    /// just to render. That tear-down/rebuild was not safe: PDFium's interactive form layer
-    /// keeps state (e.g. the just-focused annotation <c>FORM_ForceToKillFocus</c> is supposed
-    /// to have cleared) tied to the specific page-view instance, and closing it out from under
-    /// a field that had just been focused corrupted the native heap - confirmed via a crash
-    /// dump (<c>System.ExecutionEngineException</c>, no managed stack, on a thread sitting
-    /// inside <c>FORM_SetFocusedAnnot</c> for the *next* field edit) when this was tested live
-    /// against a real form. Fusing one edit's own edit+render into a single page-view lifecycle
-    /// helped but did not fully fix it - the app still died a few fields later, from the next
-    /// field's edit reopening the page fresh again. Routing through the shared
-    /// <see cref="EnsurePageOpen"/> cache instead of opening/closing here directly removes that
-    /// reopen entirely for consecutive edits on the same page.
-    /// </remarks>
     private byte[] RunOnFieldAnnotAndRender(PdfFormField field, int pixelWidth, int pixelHeight, Action<IntPtr, IntPtr> edit)
         => PdfiumRuntime.Invoke(() =>
         {
             var page = EnsurePageOpen(field.PageIndex);
+            var annot = EnsureAnnotOpen(page, field);
 
-            var annot = PdfiumNative.FPDFPage_GetAnnot(page.Handle, field.AnnotIndex);
-            if (annot == IntPtr.Zero)
-            {
-                throw new PdfException(PdfErrorCode.Unknown, $"Impossibile trovare l'annotazione per il campo '{field.Name}'.");
-            }
-
-            try
-            {
-                edit(page.Handle, annot);
-            }
-            finally
-            {
-                PdfiumNative.FPDFPage_CloseAnnot(annot);
-            }
+            edit(page.Handle, annot);
 
             return page.RenderWithFormOverlay(pixelWidth, pixelHeight, _formHandle);
         });
@@ -362,6 +420,14 @@ public sealed class PdfFormFiller : IDisposable
 
             ClosePage();
             PdfiumNative.FPDFDOC_ExitFormFillEnvironment(_formHandle);
+            Marshal.FreeHGlobal(_formInfoPtr);
+
+            foreach (var buffer in _replaceSelectionBuffers)
+            {
+                Marshal.FreeHGlobal(buffer);
+            }
+
+            _replaceSelectionBuffers.Clear();
             _disposed = true;
         });
 }
