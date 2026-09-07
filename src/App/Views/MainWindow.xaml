@@ -24,35 +24,103 @@
             <AppBarButton Label="Adatta a larghezza" Click="OnFitWidthClicked" />
             <AppBarButton Label="Adatta a pagina" Click="OnFitPageClicked" />
             <AppBarSeparator />
+            <AppBarToggleButton Icon="Edit" Label="Compila modulo" IsChecked="{x:Bind ViewModel.IsFormPanelOpen, Mode=TwoWay}"
+                                 Visibility="{x:Bind ViewModel.FormButtonVisibility, Mode=OneWay}" />
+            <AppBarSeparator />
             <AppBarButton Icon="Setting" Label="Opzioni..." Click="OnSettingsClicked" />
         </CommandBar>
 
-        <ScrollViewer x:Name="PagesScrollViewer" Grid.Row="1"
-                      HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"
-                      ZoomMode="Disabled" HorizontalScrollMode="Auto" VerticalScrollMode="Auto"
-                      Background="{x:Bind ViewModel.PageAreaBackground, Mode=OneWay}">
-            <!--
-                Every page gets a correctly-sized placeholder up front (ItemsControl over a
-                plain, non-virtualizing StackPanel) so the whole document scrolls
-                continuously and the scrollbar is right immediately; bitmaps fill in
-                progressively - see MainViewModel.RenderAllPagesAsync.
-            -->
-            <ItemsControl x:Name="PagesItemsControl" ItemsSource="{x:Bind ViewModel.Pages}" Padding="24">
-                <ItemsControl.ItemsPanel>
-                    <ItemsPanelTemplate>
-                        <StackPanel Orientation="Vertical" Spacing="16" HorizontalAlignment="Center" />
-                    </ItemsPanelTemplate>
-                </ItemsControl.ItemsPanel>
-                <ItemsControl.ItemTemplate>
-                    <DataTemplate x:DataType="vm:PdfPageViewModel">
-                        <Border Background="White" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1"
-                                Width="{x:Bind PixelWidth, Mode=OneWay}" Height="{x:Bind PixelHeight, Mode=OneWay}">
-                            <Image Source="{x:Bind Bitmap, Mode=OneWay}" Stretch="Fill" />
-                        </Border>
-                    </DataTemplate>
-                </ItemsControl.ItemTemplate>
-            </ItemsControl>
-        </ScrollViewer>
+        <SplitView Grid.Row="1" IsPaneOpen="{x:Bind ViewModel.IsFormPanelOpen, Mode=TwoWay}"
+                   PanePlacement="Right" DisplayMode="Inline" OpenPaneLength="340">
+
+            <SplitView.Pane>
+                <Grid RowDefinitions="Auto,*,Auto" Background="{ThemeResource LayerFillColorDefaultBrush}">
+
+                    <StackPanel Grid.Row="0" Orientation="Horizontal" Padding="16,12" Spacing="8">
+                        <TextBlock Text="Compila modulo" Style="{StaticResource SubtitleTextBlockStyle}" />
+                    </StackPanel>
+
+                    <!--
+                        One editable control per AcroForm field - see FormFieldEntryViewModel.
+                        Only Text and CheckBox/RadioButton fields can actually be written
+                        (PdfFormFiller.SetFieldValue/SetChecked); combo/list boxes, buttons and
+                        signatures are shown read-only for now (docs/ROADMAP.md M2).
+                    -->
+                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                        <ItemsControl ItemsSource="{x:Bind ViewModel.FormFields}" Padding="16,0,16,16">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <StackPanel Orientation="Vertical" Spacing="12" />
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="vm:FormFieldEntryViewModel">
+                                    <StackPanel Orientation="Vertical" Spacing="4">
+
+                                        <StackPanel Orientation="Vertical" Visibility="{x:Bind TextFieldVisibility}">
+                                            <TextBlock Text="{x:Bind Name}" FontSize="12" Opacity="0.7" />
+                                            <TextBox Text="{x:Bind Value, Mode=OneWay}" TextChanged="{x:Bind OnTextChanged}" LostFocus="{x:Bind CommitText}" />
+                                        </StackPanel>
+
+                                        <CheckBox Visibility="{x:Bind CheckableFieldVisibility}" Content="{x:Bind Name}"
+                                                  IsChecked="{x:Bind IsChecked, Mode=OneWay}"
+                                                  Checked="{x:Bind OnCheckedChanged}" Unchecked="{x:Bind OnCheckedChanged}" />
+
+                                        <StackPanel Orientation="Vertical" Visibility="{x:Bind ReadOnlyFieldVisibility}">
+                                            <TextBlock FontSize="12" Opacity="0.7">
+                                                <Run Text="{x:Bind Name}" />
+                                                <Run Text=" - " />
+                                                <Run Text="{x:Bind TypeLabel}" />
+                                            </TextBlock>
+                                            <TextBox Text="{x:Bind Value}" IsEnabled="False" />
+                                        </StackPanel>
+
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+
+                    <StackPanel Grid.Row="2" Orientation="Vertical" Spacing="8" Padding="16">
+                        <CheckBox Content="Appiattisci prima di salvare" IsChecked="{x:Bind ViewModel.FlattenBeforeSave, Mode=TwoWay}" />
+                        <TextBlock TextWrapping="Wrap" FontSize="11" Opacity="0.7"
+                                   Text="Rende definitivi i valori compilati e non sarà più possibile modificarli in questa sessione. Il file originale non viene mai sovrascritto." />
+                        <Button Content="Salva con nome..." HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Click="OnSaveFilledFormClicked" />
+                    </StackPanel>
+
+                </Grid>
+            </SplitView.Pane>
+
+            <SplitView.Content>
+                <ScrollViewer x:Name="PagesScrollViewer"
+                              HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"
+                              ZoomMode="Disabled" HorizontalScrollMode="Auto" VerticalScrollMode="Auto"
+                              Background="{x:Bind ViewModel.PageAreaBackground, Mode=OneWay}">
+                    <!--
+                        Every page gets a correctly-sized placeholder up front (ItemsControl over a
+                        plain, non-virtualizing StackPanel) so the whole document scrolls
+                        continuously and the scrollbar is right immediately; bitmaps fill in
+                        progressively - see MainViewModel.RenderAllPagesAsync.
+                    -->
+                    <ItemsControl x:Name="PagesItemsControl" ItemsSource="{x:Bind ViewModel.Pages}" Padding="24">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <StackPanel Orientation="Vertical" Spacing="16" HorizontalAlignment="Center" />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:PdfPageViewModel">
+                                <Border Background="White" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1"
+                                        Width="{x:Bind PixelWidth, Mode=OneWay}" Height="{x:Bind PixelHeight, Mode=OneWay}">
+                                    <Image Source="{x:Bind Bitmap, Mode=OneWay}" Stretch="Fill" />
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+            </SplitView.Content>
+
+        </SplitView>
 
         <StackPanel Grid.Row="2" Orientation="Horizontal" Padding="12,6" Spacing="16" VerticalAlignment="Center"
                     Background="{ThemeResource LayerFillColorDefaultBrush}">
@@ -62,6 +130,7 @@
                          IsIndeterminate="{x:Bind ViewModel.IsProgressIndeterminate, Mode=OneWay}"
                          Minimum="0" Maximum="100" Value="{x:Bind ViewModel.ProgressPercent, Mode=OneWay}" />
             <TextBlock Text="{x:Bind ViewModel.StatusMessage, Mode=OneWay}" Foreground="{ThemeResource SystemFillColorCriticalBrush}" VerticalAlignment="Center" />
+            <TextBlock Text="{x:Bind ViewModel.InfoMessage, Mode=OneWay}" VerticalAlignment="Center" />
         </StackPanel>
 
     </Grid>

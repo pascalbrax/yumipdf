@@ -296,6 +296,15 @@ internal static class PdfiumNative
     [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
     public static extern bool FORM_ForceToKillFocus(IntPtr formHandle);
 
+    // FPDF_RenderPageBitmap only paints each widget's last-*generated* appearance stream; it
+    // does not know a value was just changed interactively and does not regenerate it.
+    // FPDF_FFLDraw overlays the live form-fill state on top - call it right after
+    // FPDF_RenderPageBitmap (same bitmap/page/rect/rotate/flags) whenever the page might have
+    // just-edited field values that have not been flattened yet.
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern void FPDF_FFLDraw(
+        IntPtr formHandle, IntPtr bitmap, IntPtr page, int startX, int startY, int sizeX, int sizeY, int rotate, int flags);
+
     // Checkbox/radio have no direct setter in the PDFium C API - the documented way to
     // change them is to simulate the mouse click a real user would make (PDFium's internal
     // AcroForm widget handling takes care of toggling the checked state, and - for radio

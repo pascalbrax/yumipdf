@@ -34,7 +34,21 @@ public sealed class PdfPage : IDisposable
     /// Callers typically size <paramref name="pixelWidth"/>/<paramref name="pixelHeight"/>
     /// from <see cref="SizeInPoints"/> scaled by a zoom/DPI factor.
     /// </summary>
+    /// <remarks>
+    /// Shows each form field's last-<em>generated</em> appearance stream - accurate for a
+    /// document as originally authored, but a value just changed via
+    /// <see cref="Forms.PdfFormFiller.SetFieldValue"/>/<c>SetChecked</c> and not yet flattened
+    /// will not show up here. Use <see cref="Forms.PdfFormFiller.RenderPageToBgra"/> instead
+    /// once a document has an open <see cref="Forms.PdfFormFiller"/> - see its remarks.
+    /// </remarks>
     public byte[] RenderToBgra(int pixelWidth, int pixelHeight, bool renderFormFields = true)
+        => RenderToBgraCore(pixelWidth, pixelHeight, renderFormFields, formHandleForLiveOverlay: IntPtr.Zero);
+
+    /// <summary>Same as <see cref="RenderToBgra"/>, plus <c>FPDF_FFLDraw</c> to overlay the live interactive form-fill state - see <see cref="Forms.PdfFormFiller.RenderPageToBgra"/>, the only intended caller.</summary>
+    internal byte[] RenderWithFormOverlay(int pixelWidth, int pixelHeight, IntPtr formHandle)
+        => RenderToBgraCore(pixelWidth, pixelHeight, renderFormFields: true, formHandleForLiveOverlay: formHandle);
+
+    private byte[] RenderToBgraCore(int pixelWidth, int pixelHeight, bool renderFormFields, IntPtr formHandleForLiveOverlay)
     {
         if (pixelWidth <= 0 || pixelHeight <= 0)
         {
@@ -65,6 +79,11 @@ public sealed class PdfPage : IDisposable
                     PdfiumNative.FPDFBitmap_FillRect(bitmap, 0, 0, pixelWidth, pixelHeight, 0xFFFFFFFF);
                     var flags = renderFormFields ? PdfiumNative.FPDF_ANNOT | PdfiumNative.FPDF_LCD_TEXT : PdfiumNative.FPDF_LCD_TEXT;
                     PdfiumNative.FPDF_RenderPageBitmap(bitmap, _handle, 0, 0, pixelWidth, pixelHeight, /* rotate */ 0, flags);
+
+                    if (formHandleForLiveOverlay != IntPtr.Zero)
+                    {
+                        PdfiumNative.FPDF_FFLDraw(formHandleForLiveOverlay, bitmap, _handle, 0, 0, pixelWidth, pixelHeight, /* rotate */ 0, flags);
+                    }
                 }
                 finally
                 {

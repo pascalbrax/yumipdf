@@ -16,7 +16,8 @@ public enum PdfFormFieldType
     Signature = 7,
 }
 
-public sealed record PdfFormField(int PageIndex, int AnnotIndex, string Name, PdfFormFieldType Type, string Value);
+/// <param name="IsChecked">Only meaningful for <see cref="PdfFormFieldType.CheckBox"/>/<see cref="PdfFormFieldType.RadioButton"/> - <c>false</c> for every other type.</param>
+public sealed record PdfFormField(int PageIndex, int AnnotIndex, string Name, PdfFormFieldType Type, string Value, bool IsChecked);
 
 /// <summary>
 /// AcroForm field read/write access. Reading field values/names only requires a form-fill
@@ -93,6 +94,38 @@ public sealed class PdfFormFiller : IDisposable
     private IntPtr GetPageCallback(IntPtr pThis, IntPtr document, int pageIndex)
         => pageIndex == _activePageIndex ? _activePageHandle : IntPtr.Zero;
 
+    /// <summary>
+    /// Renders a page the same way <see cref="PdfPage.RenderToBgra"/> does, but additionally
+    /// overlays the live interactive form-fill state (<c>FPDF_FFLDraw</c>). Use this instead
+    /// of <see cref="PdfPage.RenderToBgra"/> whenever a <see cref="PdfFormFiller"/> is open on
+    /// the document, so a value just changed via <see cref="SetFieldValue"/>/<see cref="SetChecked"/>
+    /// (and not yet flattened) actually shows up - plain <c>FPDF_RenderPageBitmap</c> only
+    /// paints each widget's last-generated appearance stream, which a value change does not
+    /// regenerate on its own.
+    /// </summary>
+    public byte[] RenderPageToBgra(int pageIndex, int pixelWidth, int pixelHeight)
+    {
+        ThrowIfDisposed();
+        lock (PdfiumRuntime.Gate)
+        {
+            using var page = _document.GetPage(pageIndex);
+
+            // Same requirement as the interactive calls in RunOnFieldAnnot: FPDF_FFLDraw
+            // needs PDFium's internal page-view state for this exact page handle, not just
+            // the one that existed (and was torn down again) while the field was being
+            // edited.
+            PdfiumNative.FORM_OnAfterLoadPage(page.Handle, _formHandle);
+            try
+            {
+                return page.RenderWithFormOverlay(pixelWidth, pixelHeight, _formHandle);
+            }
+            finally
+            {
+                PdfiumNative.FORM_OnBeforeClosePage(page.Handle, _formHandle);
+            }
+        }
+    }
+
     /// <summary>Enumerates AcroForm widget fields across every page.</summary>
     public IReadOnlyList<PdfFormField> ListFields()
     {
@@ -124,8 +157,10 @@ public sealed class PdfFormFiller : IDisposable
                         var type = (PdfFormFieldType)PdfiumNative.FPDFAnnot_GetFormFieldType(_formHandle, annot);
                         var name = ReadUtf16String((buf, len) => PdfiumNative.FPDFAnnot_GetFormFieldName(_formHandle, annot, buf, len));
                         var value = ReadUtf16String((buf, len) => PdfiumNative.FPDFAnnot_GetFormFieldValue(_formHandle, annot, buf, len));
+                        var isChecked = type is PdfFormFieldType.CheckBox or PdfFormFieldType.RadioButton
+                            && PdfiumNative.FPDFAnnot_IsChecked(_formHandle, annot);
 
-                        fields.Add(new PdfFormField(pageIndex, annotIndex, name, type, value));
+                        fields.Add(new PdfFormField(pageIndex, annotIndex, name, type, value, isChecked));
                     }
                     finally
                     {

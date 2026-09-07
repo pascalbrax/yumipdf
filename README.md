@@ -12,13 +12,15 @@ Visualizzatore, editor e compilatore di moduli PDF nativo per Windows 10 e 11.
 - Sfondo dell'area pagina personalizzabile (menu Opzioni)
 - Associazione col tipo file `.pdf` attivabile/disattivabile dal menu Opzioni (mai automatica)
 - Unione, suddivisione e riordino di PDF
-- Lettura dei campi AcroForm (nome/tipo/valore)
+- Compilazione di moduli AcroForm dal pannello "Compila modulo": campi di testo e checkbox/radio,
+  con anteprima live del valore appena scritto sulla pagina; salvataggio con nome, con appiattimento
+  opzionale (rende i valori permanenti, non più modificabili in quella sessione)
 - Annotazione di evidenziazione
 - Stampa (dialogo nativo, intervallo pagine)
 
-La compilazione **in scrittura** dei campi modulo, la ricerca testo, la navigazione da miniature/indice,
-le annotazioni avanzate (nota, disegno libero, timbro) e l'installer sono pianificati nelle milestone
-successive - vedi la roadmap.
+Combo box/list box modificabili, la ricerca testo, la navigazione da miniature/indice, le annotazioni
+avanzate (nota, disegno libero, timbro) e l'installer sono pianificati nelle milestone successive - vedi
+la roadmap.
 
 ## Requisiti di sviluppo
 

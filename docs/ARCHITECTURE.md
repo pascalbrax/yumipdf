@@ -151,6 +151,41 @@ reale - servirebbe un PDF compilabile di dimensioni ridotte da includere nel rep
 (non fatto qui: il file usato per la verifica è un documento personale dell'utente, non incluso nel
 repository).
 
+## Pannello "Compila modulo": tre bug trovati testando dal vivo la UI
+
+Collegare `PdfFormFiller` a un pannello interattivo (`MainWindow`'s SplitView, `FormFieldEntryViewModel`) ha
+esposto tre problemi che non emergevano dai test automatici né dalla verifica a riga di comando di M2 - tutti
+trovati eseguendo davvero l'app (screenshot + click/digitazione simulati), non per ispezione del codice:
+
+1. **Il valore digitato non appariva sulla pagina finché non si appiattiva.** Causa: `FPDF_RenderPageBitmap`
+   disegna solo l'ultima appearance stream *generata* di un widget; una modifica interattiva del valore non la
+   rigenera da sola. Serve `FPDF_FFLDraw` (chiamata subito dopo `FPDF_RenderPageBitmap`, stesso
+   bitmap/pagina/rettangolo) per sovrapporre lo stato interattivo corrente. Aggiunta
+   `PdfPage.RenderWithFormOverlay`/`PdfFormFiller.RenderPageToBgra`, usata da `MainViewModel` ogni volta che
+   c'è un `PdfFormFiller` aperto (sia per il rendering iniziale sia per il refresh dopo un edit - altrimenti un
+   valore già scritto "sparirebbe" al primo cambio di zoom, che ri-renderizza tutte le pagine). Anche
+   `FPDF_FFLDraw` richiede `FORM_OnAfterLoadPage`/`FORM_OnBeforeClosePage` attorno a sé, come le funzioni
+   `FORM_*` interattive.
+2. **`SetFieldValue` scriveva il valore "vecchio" (quello prima dell'ultima modifica).** Causa: in WinUI3 il
+   binding `TwoWay` di `TextBox.Text` si aggiorna sull'evento `LostFocus` - lo stesso evento a cui era
+   agganciato il commit verso PDFium - e l'ordine fra "il framework scrive il testo modificato nella
+   proprietà" e "il nostro handler legge quella proprietà" non è garantito. Soluzione: `TextChanged` aggiorna
+   `Value` a ogni tasto (niente `TwoWay` su `Text`), così quando `LostFocus` scatta il commit legge un valore
+   già aggiornato per costruzione, non per tempismo. Applicata la stessa cautela alla `CheckBox` (si legge
+   `checkBox.IsChecked` direttamente nell'handler invece di fidarsi di un `TwoWay`).
+3. **Crash nativo del processo** (nessuna eccezione gestita, nessuna riga in `crash.log`: un vero
+   *access violation*) appiattendo il documento subito dopo averlo compilato. Causa più probabile: si
+   chiamava `FPDFPage_Flatten` su ogni pagina mentre l'ambiente di form-fill interattivo
+   (`FPDFDOC_InitFormFillEnvironment`) del `PdfFormFiller` era ancora attivo sullo stesso documento. Fix:
+   `MainViewModel.SaveFilledFormAsync` ora chiude il `PdfFormFiller` (`FPDFDOC_ExitFormFillEnvironment`) e
+   svuota il pannello **prima** di appiattire, non dopo - il che è anche coerente con l'avviso già mostrato
+   all'utente ("non sarà più possibile modificare i campi in questa sessione").
+
+Morale per chi tocca ancora quest'area: **il livello PdfEngine testato in isolamento (M2, riga di comando) non
+basta a garantire che l'integrazione con un'app interattiva sia corretta** - i tre bug sopra emergono solo
+quando c'è un vero ciclo UI (digitare → perdere il focus → renderizzare di nuovo → salvare) in sequenza reale,
+non nell'ordine "pulito" con cui li si testerebbe uno alla volta da codice.
+
 ## Stampa: perché non l'API di stampa WinRT nativa
 
 WinUI3 non espone ancora un equivalente diretto di `Windows.UI.Xaml.Printing.PrintDocument` (UWP): il tipo

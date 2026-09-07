@@ -165,4 +165,30 @@ public sealed partial class MainWindow : Window
             ViewModel.StatusMessage = $"Impossibile aggiornare l'associazione dei file .pdf: {ex.Message}";
         }
     }
+
+    private async void OnSaveFilledFormClicked(object sender, RoutedEventArgs e)
+    {
+        var picker = new FileSavePicker();
+        InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
+
+        picker.FileTypeChoices.Add("Documento PDF", new List<string> { ".pdf" });
+        picker.SuggestedFileName = ViewModel.DocumentTitle is { } title
+            ? $"{Path.GetFileNameWithoutExtension(title)}-compilato"
+            : "documento-compilato";
+
+        var file = await picker.PickSaveFileAsync();
+        if (file is null)
+        {
+            return;
+        }
+
+        var flatten = ViewModel.FlattenBeforeSave;
+        var saved = await ViewModel.SaveFilledFormAsync(file.Path, flatten);
+        // When flatten is true, SaveFilledFormAsync already sets its own status message
+        // (the panel/filler get torn down at the same time) - do not overwrite it here.
+        if (saved && !flatten)
+        {
+            ViewModel.InfoMessage = $"Salvato in {file.Path}";
+        }
+    }
 }

@@ -9,6 +9,7 @@ using Microsoft.UI.Xaml.Media.Imaging;
 using Windows.UI;
 using Pdf26.Services;
 using PdfEngine;
+using PdfEngine.Forms;
 
 namespace Pdf26.ViewModels;
 
@@ -32,6 +33,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private readonly FileSourceResolver _sourceResolver = new();
     private readonly SettingsService _settingsService = new();
     private PdfDocument? _document;
+    private PdfFormFiller? _formFiller;
     private PdfSource? _lastResolvedSource;
     private string? _lastResolvedLocalPath;
     private CancellationTokenSource? _renderCts;
@@ -39,6 +41,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private double _maxZoomForDocument = MaxZoom;
 
     public ObservableCollection<PdfPageViewModel> Pages { get; } = new();
+
+    public ObservableCollection<FormFieldEntryViewModel> FormFields { get; } = new();
+
+    [ObservableProperty]
+    public partial bool IsFormPanelOpen { get; set; }
+
+    /// <summary>Same reasoning as <see cref="ProgressVisibility"/> - computed here rather than a converter bound from x:Bind.</summary>
+    public Visibility FormButtonVisibility => FormFields.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
 
     [ObservableProperty]
     public partial int CurrentPageIndex { get; set; }
@@ -49,8 +59,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     public partial string? DocumentTitle { get; set; }
 
+    /// <summary>Shown in the status bar in an error color - reserve for actual failures, not confirmations (see <see cref="InfoMessage"/>).</summary>
     [ObservableProperty]
     public partial string? StatusMessage { get; set; }
+
+    /// <summary>Neutral-colored status bar text for non-error confirmations (e.g. a completed save) - kept separate from <see cref="StatusMessage"/> so a success does not visually read as an error.</summary>
+    [ObservableProperty]
+    public partial string? InfoMessage { get; set; }
 
     /// <summary>Whether the status bar's progress indicator should be visible at all (resolving/opening a source, or rendering pages).</summary>
     [ObservableProperty]
@@ -74,6 +89,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public Visibility ProgressVisibility => IsBusy ? Visibility.Visible : Visibility.Collapsed;
 
     partial void OnIsBusyChanged(bool value) => OnPropertyChanged(nameof(ProgressVisibility));
+
+    /// <summary>Whether "Salva con nome..." flattens the form first - see <see cref="SaveFilledFormAsync"/>.</summary>
+    [ObservableProperty]
+    public partial bool FlattenBeforeSave { get; set; } = true;
 
     [ObservableProperty]
     public partial SolidColorBrush PageAreaBackground { get; set; } = new(Colors.Gray);
@@ -99,6 +118,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public async Task<OpenOutcome> OpenAsync(PdfSource source, string? password = null, CancellationToken cancellationToken = default)
     {
         StatusMessage = $"Apertura di {source.Value}...";
+        InfoMessage = null;
         // Indeterminate while resolving/reading the source: its duration is unknown (a UNC
         // share or an HTTP download can take anywhere from instant to a while). RunRenderAsync
         // switches this to a determinate per-page percentage once the page count is known.
@@ -138,6 +158,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 return OpenOutcome.PasswordRequired;
             }
 
+            _formFiller?.Dispose();
+            _formFiller = null;
+            FormFields.Clear();
+            IsFormPanelOpen = false;
+
             _document?.Dispose();
             _document = document;
 
@@ -146,6 +171,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
             CurrentPageIndex = 0;
             _maxZoomForDocument = ComputeMaxZoomForDocument(_document);
             Zoom = Math.Min(Zoom, _maxZoomForDocument);
+
+            LoadFormFields(_document);
 
             await RenderAllPagesAsync(cancellationToken, isNewDocument: true);
             StatusMessage = null;
@@ -223,6 +250,215 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     public PdfDocument? Document => _document;
 
+    // ---- Form filling (M2) --------------------------------------------------------------
+
+    /// <summary>
+    /// Builds a <see cref="PdfFormFiller"/> for the newly-opened <paramref name="document"/>
+    /// and populates <see cref="FormFields"/> - a no-op (empty list, no filler kept around)
+    /// for a document with no AcroForm fields, which is the common case and not an error.
+    /// </summary>
+    private void LoadFormFields(PdfDocument document)
+    {
+        try
+        {
+            var filler = new PdfFormFiller(document);
+            var fields = filler.ListFields();
+            if (fields.Count == 0)
+            {
+                filler.Dispose();
+                return;
+            }
+
+            _formFiller = filler;
+            foreach (var field in fields)
+            {
+                FormFields.Add(new FormFieldEntryViewModel(field, this));
+            }
+        }
+        catch (PdfException)
+        {
+            // Failing to set up the form-fill environment should not prevent viewing the
+            // document itself - it just means no "Compila modulo" panel for this one.
+        }
+        finally
+        {
+            OnPropertyChanged(nameof(FormButtonVisibility));
+        }
+    }
+
+    /// <summary>Commits a text field's edited value and re-renders its page so the change is visible immediately.</summary>
+    public async Task ApplyFieldTextAsync(FormFieldEntryViewModel entry)
+    {
+        if (_formFiller is null)
+        {
+            return;
+        }
+
+        try
+        {
+            _formFiller.SetFieldValue(entry.Field, entry.Value);
+            await RenderSinglePageAsync(entry.Field.PageIndex);
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Impossibile aggiornare il campo '{entry.Field.Name}': {ex.Message}";
+        }
+    }
+
+    /// <summary>Commits a checkbox/radio button's new state and re-renders its page.</summary>
+    public async Task ApplyFieldCheckedAsync(FormFieldEntryViewModel entry)
+    {
+        if (_formFiller is null)
+        {
+            return;
+        }
+
+        try
+        {
+            _formFiller.SetChecked(entry.Field, entry.IsChecked);
+            await RenderSinglePageAsync(entry.Field.PageIndex);
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Impossibile aggiornare il campo '{entry.Field.Name}': {ex.Message}";
+        }
+    }
+
+    /// <summary>
+    /// Saves the document with its current field values. When <paramref name="flatten"/> is
+    /// set, every page is flattened first - permanently baking the field values into the page
+    /// content and dropping the interactive widgets. That is irreversible for the rest of
+    /// this session (the in-memory document really did lose its form), so the form panel and
+    /// filler are torn down *before* flattening, not after - flattening a page while PDFium
+    /// still has an active interactive form-fill environment/page-view referencing it crashed
+    /// the process outright (an unrecoverable native crash, not a catchable .NET exception)
+    /// when this was tested live against a real form. The original file on disk is untouched
+    /// either way since this always writes to <paramref name="destinationPath"/>, never in place.
+    /// </summary>
+    public async Task<bool> SaveFilledFormAsync(string destinationPath, bool flatten)
+    {
+        var document = _document;
+        if (document is null)
+        {
+            return false;
+        }
+
+        if (flatten)
+        {
+            _formFiller?.Dispose();
+            _formFiller = null;
+            FormFields.Clear();
+            IsFormPanelOpen = false;
+            OnPropertyChanged(nameof(FormButtonVisibility));
+        }
+
+        try
+        {
+            await Task.Run(() =>
+            {
+                if (flatten)
+                {
+                    for (var index = 0; index < document.PageCount; index++)
+                    {
+                        using var page = document.GetPage(index);
+                        page.Flatten();
+                    }
+                }
+
+                document.SaveAs(destinationPath);
+            });
+
+            if (flatten)
+            {
+                InfoMessage = "Documento appiattito e salvato: i campi non sono più modificabili in questa sessione.";
+            }
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Impossibile salvare il documento: {ex.Message}";
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Renders one page, routing through <see cref="PdfFormFiller.RenderPageToBgra"/> whenever
+    /// a form filler is open on the document - so an edited-but-not-yet-flattened field value
+    /// actually shows up (plain <c>PdfPage.RenderToBgra</c> only paints each widget's
+    /// last-generated appearance stream, not live edits - see its remarks). Used by both the
+    /// whole-document render loop and the single-page refresh after a field edit, so a value
+    /// someone just typed does not appear to "revert" the next time the whole document
+    /// re-renders (e.g. on a zoom change).
+    /// </summary>
+    private static byte[] RenderPageBgra(PdfDocument document, PdfFormFiller? formFiller, int pageIndex, int pixelWidth, int pixelHeight)
+    {
+        if (formFiller is not null)
+        {
+            return formFiller.RenderPageToBgra(pageIndex, pixelWidth, pixelHeight);
+        }
+
+        using var page = document.GetPage(pageIndex);
+        return page.RenderToBgra(pixelWidth, pixelHeight);
+    }
+
+    /// <summary>Re-renders a single already-rendered page in place - used after editing a form field, far cheaper than re-rendering the whole document.</summary>
+    private Task RenderSinglePageAsync(int pageIndex)
+    {
+        var previousRender = _renderTask;
+        var task = RenderSinglePageCoreAsync(previousRender, pageIndex);
+        _renderTask = task;
+        return task;
+    }
+
+    private async Task RenderSinglePageCoreAsync(Task previousRender, int pageIndex)
+    {
+        try
+        {
+            await previousRender.ConfigureAwait(true);
+        }
+        catch
+        {
+            // Same reasoning as RunRenderAsync: only waiting to know it is safe to proceed.
+        }
+
+        var document = _document;
+        var formFiller = _formFiller;
+        if (document is null || pageIndex < 0 || pageIndex >= Pages.Count)
+        {
+            return;
+        }
+
+        var placeholder = Pages[pageIndex];
+        var pixelWidth = (int)Math.Round(placeholder.PixelWidth);
+        var pixelHeight = (int)Math.Round(placeholder.PixelHeight);
+
+        IsBusy = true;
+        IsProgressIndeterminate = false;
+        ProgressPercent = 0;
+        try
+        {
+            var bgra = await Task.Run(() => RenderPageBgra(document, formFiller, pageIndex, pixelWidth, pixelHeight)).ConfigureAwait(true);
+
+            var bitmap = new WriteableBitmap(pixelWidth, pixelHeight);
+            using (var stream = bitmap.PixelBuffer.AsStream())
+            {
+                stream.Write(bgra, 0, bgra.Length);
+            }
+
+            placeholder.Bitmap = bitmap;
+            ProgressPercent = 100;
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Errore durante il rendering: {ex.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
     /// <summary>
     /// Two-phase render: first size every page for the current zoom (cheap - no bitmap
     /// decode), so the scrollable area/scrollbar are correct immediately; then fill in
@@ -278,6 +514,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
 
         var document = _document;
+        var formFiller = _formFiller;
         if (document is null)
         {
             Pages.Clear();
@@ -334,11 +571,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 var pixelWidth = (int)Math.Round(placeholder.PixelWidth);
                 var pixelHeight = (int)Math.Round(placeholder.PixelHeight);
 
-                var bgra = await Task.Run(() =>
-                {
-                    using var page = document.GetPage(pageIndex);
-                    return page.RenderToBgra(pixelWidth, pixelHeight);
-                }, cts.Token).ConfigureAwait(true);
+                var bgra = await Task.Run(() => RenderPageBgra(document, formFiller, pageIndex, pixelWidth, pixelHeight), cts.Token)
+                    .ConfigureAwait(true);
 
                 var bitmap = new WriteableBitmap(pixelWidth, pixelHeight);
                 using (var stream = bitmap.PixelBuffer.AsStream())
@@ -401,6 +635,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public void Dispose()
     {
         _renderCts?.Cancel();
+        _formFiller?.Dispose();
+        _formFiller = null;
         _document?.Dispose();
         _document = null;
     }

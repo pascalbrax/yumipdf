@@ -26,9 +26,9 @@
 - [x] Checkbox/radio (`PdfFormFiller.SetChecked`, via simulazione di click con `FORM_OnLButtonDown`/`Up` sul rettangolo del widget - nessun setter diretto esiste nell'API)
 - [x] "Appiattimento" (flatten) del form compilato in output (`PdfPage.Flatten`, `FPDFPage_Flatten`)
 - [x] Verificato end-to-end con un modulo compilabile reale (33 campi testo con caratteri accentati + 2 checkbox, salvataggio, riapertura, rendering) - vedi docs/ARCHITECTURE.md
-- [ ] Combo box (editabili) e list box - nessuna copertura ancora, il PDF di test non ne conteneva; combo editabili dovrebbero seguire lo stesso percorso testuale di `SetFieldValue`, ma non verificato
+- [x] UI applicativa per la compilazione moduli: pannello "Compila modulo" (`SplitView`), un controllo per campo (`TextBox`/`CheckBox`/sola lettura per gli altri tipi), rendering live del campo appena modificato (`FPDF_FFLDraw`), "Salva con nome..." con flatten opzionale. Tre bug reali trovati testando dal vivo con screenshot/click simulati (rendering che non si aggiornava, valore "vecchio" scritto per una race sul binding, crash nativo appiattendo con l'ambiente form-fill ancora attivo) - vedi docs/ARCHITECTURE.md "Pannello Compila modulo"
+- [ ] Combo box (editabili) e list box - nessuna copertura ancora, il PDF di test non ne conteneva; combo editabili dovrebbero seguire lo stesso percorso testuale di `SetFieldValue`, ma non verificato. Nel pannello sono mostrati in sola lettura
 - [ ] Fixture di test AcroForm inclusa nel repository per `PdfEngine.Tests` (oggi la verifica di scrittura è manuale contro un documento reale non incluso nel repo)
-- [ ] UI applicativa per la compilazione moduli (oggi `PdfFormFiller` è utilizzabile solo a livello di libreria, senza un pannello/dialogo nell'app per elencare e modificare i campi di un documento aperto)
 
 ## M3 - Editor / annotazioni avanzate
 - [ ] Nota/testo libero, disegno a mano libera (ink), timbro
