@@ -115,7 +115,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
             }
             else
             {
-                localPath = await _sourceResolver.ResolveToLocalPathAsync(source, cancellationToken).ConfigureAwait(false);
+                // Deliberately no ConfigureAwait(false): OpenAsync keeps touching UI-thread-
+                // affine state (ObservableProperty setters that drive x:Bind, and the render
+                // call below whose own ConfigureAwait(true) calls only work if there is still
+                // a UI SynchronizationContext to return to). Losing the UI thread here was a
+                // real bug - the status bar's "Apertura di ..." text stopped reliably clearing
+                // once the document had actually finished loading, because everything after
+                // this await (including the final `StatusMessage = null`) ran off-thread.
+                localPath = await _sourceResolver.ResolveToLocalPathAsync(source, cancellationToken);
                 _lastResolvedSource = source;
                 _lastResolvedLocalPath = localPath;
             }
@@ -140,7 +147,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             _maxZoomForDocument = ComputeMaxZoomForDocument(_document);
             Zoom = Math.Min(Zoom, _maxZoomForDocument);
 
-            await RenderAllPagesAsync(cancellationToken, isNewDocument: true).ConfigureAwait(false);
+            await RenderAllPagesAsync(cancellationToken, isNewDocument: true);
             StatusMessage = null;
             return OpenOutcome.Success;
         }

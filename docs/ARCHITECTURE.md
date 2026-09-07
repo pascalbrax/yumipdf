@@ -48,6 +48,19 @@ rendering successivi dietro quello in corso (invece di limitarsi ad annullarlo) 
 thread UI in attesa del lock e da non sprecare lavoro renderizzando pagine per una collezione che la
 richiesta piu' recente sta per svuotare.
 
+## `ConfigureAwait` nel ViewModel: mai `false`
+
+`MainViewModel` (e in generale qualunque codice sotto `src/App`, a differenza di `PdfEngine`/`Printing`
+che sono librerie pure) non deve mai usare `.ConfigureAwait(false)`: i suoi metodi `async` continuano a
+toccare stato che deve restare sul thread UI - proprietà `[ObservableProperty]` che pilotano `x:Bind`, e
+`RenderAllPagesAsync`/`RunRenderAsync` il cui stesso `ConfigureAwait(true)` funziona solo se esiste ancora
+un `SynchronizationContext` della UI a cui tornare. Un `ConfigureAwait(false)` in `OpenAsync` (sulla
+risoluzione della sorgente) era proprio questo bug: dopo quel punto tutto il resto del metodo - incluso
+l'`await` sul rendering e l'assegnazione finale `StatusMessage = null` - girava fuori dal thread UI, e
+l'aggiornamento della barra di stato a fine caricamento non arrivava in modo affidabile (il testo "Apertura
+di ..." restava visibile anche a documento perfettamente caricato). `FileSourceResolver` invece usa
+correttamente `ConfigureAwait(false)` al suo interno: è un servizio di libreria che non tocca mai la UI.
+
 ## Zoom istantaneo ("fake zoom")
 
 Su un cambio di zoom, `RenderAllPagesAsync`/`RunRenderAsync` non svuota piu' `Pages` e non riparte da
