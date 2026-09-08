@@ -16,12 +16,27 @@ public partial class FormFieldEntryViewModel : ObservableObject
 {
     private readonly MainViewModel _owner;
 
-    public FormFieldEntryViewModel(PdfFormField field, MainViewModel owner)
+    // Guards SelectedOptionIndex's change hook from firing (and committing a redundant/premature
+    // write back to PDFium) while *we* are the ones assigning it - during construction, and in
+    // SyncFromField after a push button's action (e.g. Reset Form) changed it - as opposed to a
+    // real user picking a new option in the panel's ComboBox/ListView, which is the only case
+    // that should actually commit anything.
+    private bool _suppressSelectionCommit;
+
+    /// <param name="options">A ComboBox/ListBox field's selectable labels, in order (from <c>PdfFormFiller.GetOptions</c>) - empty/ignored for every other field type.</param>
+    /// <param name="selectedOptionIndices">Which of <paramref name="options"/> are currently selected (from <c>PdfFormFiller.GetSelectedOptionIndices</c>) - 0 or 1 entries for a combo box.</param>
+    public FormFieldEntryViewModel(
+        PdfFormField field, MainViewModel owner,
+        IReadOnlyList<string>? options = null, IReadOnlyList<int>? selectedOptionIndices = null)
     {
+        _suppressSelectionCommit = true;
         Field = field;
         _owner = owner;
         Value = field.Value;
         IsChecked = field.IsChecked;
+        Options = options ?? [];
+        SelectedOptionIndex = selectedOptionIndices is { Count: > 0 } ? selectedOptionIndices[0] : -1;
+        _suppressSelectionCommit = false;
     }
 
     public PdfFormField Field { get; }
@@ -44,10 +59,20 @@ public partial class FormFieldEntryViewModel : ObservableObject
     /// <summary>Centering a single-line value in its (short) overlay box looks right; centering several lines of wrapped text in a tall multi-line box does not - text should start at the top instead.</summary>
     public VerticalAlignment OverlayVerticalContentAlignment => IsMultiline ? VerticalAlignment.Top : VerticalAlignment.Center;
 
-    public bool IsCheckableField => Field.Type is PdfFormFieldType.CheckBox or PdfFormFieldType.RadioButton;
+    public bool IsCheckBoxField => Field.Type == PdfFormFieldType.CheckBox;
 
-    /// <summary>Push buttons, signatures, combo/list boxes: shown read-only - see docs/ROADMAP.md M2 for what's not covered yet.</summary>
-    public bool IsReadOnlyField => !IsTextField && !IsCheckableField;
+    public bool IsRadioButtonField => Field.Type == PdfFormFieldType.RadioButton;
+
+    public bool IsCheckableField => IsCheckBoxField || IsRadioButtonField;
+
+    public bool IsComboBoxField => Field.Type == PdfFormFieldType.ComboBox;
+
+    public bool IsListBoxField => Field.Type == PdfFormFieldType.ListBox;
+
+    public bool IsButtonField => Field.Type == PdfFormFieldType.PushButton;
+
+    /// <summary>Signatures: PDFium has no API this project uses to write one, so they stay read-only.</summary>
+    public bool IsReadOnlyField => !IsTextField && !IsCheckableField && !IsComboBoxField && !IsListBoxField && !IsButtonField;
 
     // x:Bind cannot convert bool -> Visibility on its own without a converter, and a
     // StaticResource-based converter is unsafe here (see MainViewModel.ProgressVisibility's
@@ -56,7 +81,44 @@ public partial class FormFieldEntryViewModel : ObservableObject
 
     public Visibility CheckableFieldVisibility => IsCheckableField ? Visibility.Visible : Visibility.Collapsed;
 
+    public Visibility CheckBoxFieldVisibility => IsCheckBoxField ? Visibility.Visible : Visibility.Collapsed;
+
+    public Visibility RadioButtonFieldVisibility => IsRadioButtonField ? Visibility.Visible : Visibility.Collapsed;
+
+    public Visibility ComboBoxFieldVisibility => IsComboBoxField ? Visibility.Visible : Visibility.Collapsed;
+
+    public Visibility ListBoxFieldVisibility => IsListBoxField ? Visibility.Visible : Visibility.Collapsed;
+
+    public Visibility ButtonFieldVisibility => IsButtonField ? Visibility.Visible : Visibility.Collapsed;
+
     public Visibility ReadOnlyFieldVisibility => IsReadOnlyField ? Visibility.Visible : Visibility.Collapsed;
+
+    /// <summary>A ComboBox/ListBox field's selectable labels, in the PDF's own order - empty for every other field type.</summary>
+    public IReadOnlyList<string> Options { get; }
+
+    /// <summary>-1 when nothing is selected. Bound TwoWay to the panel's ComboBox/ListView SelectedIndex.</summary>
+    [ObservableProperty]
+    public partial int SelectedOptionIndex { get; set; }
+
+    partial void OnSelectedOptionIndexChanged(int value)
+    {
+        if (_suppressSelectionCommit || value < 0 || value >= Options.Count)
+        {
+            return;
+        }
+
+        if (IsComboBoxField)
+        {
+            _ = _owner.ApplyComboSelectionAsync(this);
+        }
+        else if (IsListBoxField)
+        {
+            _ = _owner.ApplyListSelectionAsync(this);
+        }
+    }
+
+    /// <summary>Bound to the panel's/overlay's Reset (or other) push button - whatever action the PDF attached to it runs via PDFium's own click handling.</summary>
+    public void OnButtonClicked(object sender, RoutedEventArgs e) => _ = _owner.ApplyButtonClickAsync(this);
 
     // ---- On-page overlay (in-place editing directly on the rendered page) ----------------
     // Position/size in pixels, in the same top-left-origin coordinate space as the page
@@ -81,6 +143,10 @@ public partial class FormFieldEntryViewModel : ObservableObject
     [ObservableProperty]
     public partial double OverlayFontSize { get; set; } = 12;
 
+    /// <summary>0 for a checkbox's square frame; half the shorter side for a radio button's round one - a radio group is only a valid "pick exactly one" control if it visually reads as a set of round buttons, not squares with a checkmark.</summary>
+    [ObservableProperty]
+    public partial CornerRadius OverlayCornerRadius { get; set; }
+
     /// <summary>
     /// Whether the on-page overlay is shown at all - pushed by <see cref="MainViewModel"/>
     /// whenever <see cref="MainViewModel.IsFormPanelOpen"/> changes, rather than each field
@@ -91,9 +157,17 @@ public partial class FormFieldEntryViewModel : ObservableObject
     [ObservableProperty]
     public partial Visibility OverlayVisibility { get; set; } = Visibility.Collapsed;
 
-    public Visibility CheckedGlyphVisibility => IsChecked ? Visibility.Visible : Visibility.Collapsed;
+    /// <summary>Checkbox's own "on" indicator - a checkmark glyph. See <see cref="CheckedDotVisibility"/> for the radio button's.</summary>
+    public Visibility CheckedGlyphVisibility => IsChecked && IsCheckBoxField ? Visibility.Visible : Visibility.Collapsed;
 
-    partial void OnIsCheckedChanged(bool value) => OnPropertyChanged(nameof(CheckedGlyphVisibility));
+    /// <summary>Radio button's own "on" indicator - a filled dot, not a checkmark: a radio group only reads as "exactly one of these" when its options look like radio buttons, not checkboxes.</summary>
+    public Visibility CheckedDotVisibility => IsChecked && IsRadioButtonField ? Visibility.Visible : Visibility.Collapsed;
+
+    partial void OnIsCheckedChanged(bool value)
+    {
+        OnPropertyChanged(nameof(CheckedGlyphVisibility));
+        OnPropertyChanged(nameof(CheckedDotVisibility));
+    }
 
     /// <summary>Recomputes the overlay's on-screen position/size for a new zoom level - called whenever the owning page is (re)sized.</summary>
     public void UpdateOverlay(double zoom, double pageHeightPoints)
@@ -104,6 +178,7 @@ public partial class FormFieldEntryViewModel : ObservableObject
         OverlayWidth = Math.Max(1, (Field.RectRight - Field.RectLeft) * zoom);
         OverlayHeight = Math.Max(1, (Field.RectTop - Field.RectBottom) * zoom);
         OverlayFontSize = Math.Clamp(OverlayHeight * 0.6, 8, 20);
+        OverlayCornerRadius = IsRadioButtonField ? new CornerRadius(Math.Min(OverlayWidth, OverlayHeight) / 2) : new CornerRadius(0);
     }
 
     /// <summary>Tap target for the on-page checkbox/radio overlay (a plain Border, not a WinUI CheckBox - its default chrome/padding does not fit small AcroForm checkbox rectangles well).</summary>
@@ -118,8 +193,8 @@ public partial class FormFieldEntryViewModel : ObservableObject
         PdfFormFieldType.Text => "Testo",
         PdfFormFieldType.CheckBox => "Casella di controllo",
         PdfFormFieldType.RadioButton => "Pulsante di opzione",
-        PdfFormFieldType.ComboBox => "Elenco a discesa (non modificabile)",
-        PdfFormFieldType.ListBox => "Elenco (non modificabile)",
+        PdfFormFieldType.ComboBox => "Elenco a discesa",
+        PdfFormFieldType.ListBox => "Elenco",
         PdfFormFieldType.PushButton => "Pulsante",
         PdfFormFieldType.Signature => "Firma (non modificabile)",
         _ => "Sconosciuto",
@@ -150,14 +225,45 @@ public partial class FormFieldEntryViewModel : ObservableObject
     /// <summary>Bound to the text box's LostFocus in the panel - x:Bind can target a method directly on this item's own DataContext.</summary>
     public void CommitText() => _ = _owner.ApplyFieldTextAsync(this);
 
-    /// <summary>Reads the checkbox's own state directly (see <see cref="OnTextChanged"/> for why) rather than trusting a TwoWay-bound <see cref="IsChecked"/> to already be current, then commits.</summary>
+    /// <summary>Reads the checkbox's/radio button's own state directly (see <see cref="OnTextChanged"/> for why) rather than trusting a TwoWay-bound <see cref="IsChecked"/> to already be current, then commits.</summary>
     public void OnCheckedChanged(object sender, RoutedEventArgs e)
     {
-        if (sender is CheckBox checkBox)
+        IsChecked = sender switch
         {
-            IsChecked = checkBox.IsChecked == true;
-        }
+            CheckBox checkBox => checkBox.IsChecked == true,
+            RadioButton radioButton => radioButton.IsChecked == true,
+            _ => IsChecked,
+        };
 
         _ = _owner.ApplyFieldCheckedAsync(this);
+    }
+
+    /// <summary>
+    /// Refreshes this field's editable state from a freshly re-read <see cref="PdfFormField"/> -
+    /// used after a push button click (a "Reset Form" action, most commonly), which can change
+    /// any field's value, not just the button's own. Never called for a normal user edit of
+    /// *this* field: those already know their own new value/state directly.
+    /// </summary>
+    public void SyncFromField(PdfFormField fresh)
+    {
+        Value = fresh.Value;
+        IsChecked = fresh.IsChecked;
+
+        if (Options.Count > 0)
+        {
+            var index = -1;
+            for (var i = 0; i < Options.Count; i++)
+            {
+                if (Options[i] == fresh.Value)
+                {
+                    index = i;
+                    break;
+                }
+            }
+
+            _suppressSelectionCommit = true;
+            SelectedOptionIndex = index;
+            _suppressSelectionCommit = false;
+        }
     }
 }

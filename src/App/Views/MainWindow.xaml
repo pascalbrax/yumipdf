@@ -63,9 +63,37 @@
                                                      AcceptsReturn="{x:Bind IsMultiline}" TextWrapping="{x:Bind OverlayTextWrapping}" />
                                         </StackPanel>
 
-                                        <CheckBox Visibility="{x:Bind CheckableFieldVisibility}" Content="{x:Bind Name}"
+                                        <CheckBox Visibility="{x:Bind CheckBoxFieldVisibility}" Content="{x:Bind Name}"
                                                   IsChecked="{x:Bind IsChecked, Mode=OneWay}"
                                                   Checked="{x:Bind OnCheckedChanged}" Unchecked="{x:Bind OnCheckedChanged}" />
+
+                                        <!--
+                                            A native RadioButton (not CheckBox): it already reads
+                                            as "exactly one of these" both visually (a round dot,
+                                            not a checkmark in a square) and behaviorally -
+                                            GroupName ties every widget sharing this field's PDF
+                                            /T name into one WinUI-level exclusive group too,
+                                            on top of PdfFormFiller's own radio-group handling.
+                                        -->
+                                        <RadioButton Visibility="{x:Bind RadioButtonFieldVisibility}" Content="{x:Bind Name}"
+                                                     GroupName="{x:Bind Name}"
+                                                     IsChecked="{x:Bind IsChecked, Mode=OneWay}"
+                                                     Checked="{x:Bind OnCheckedChanged}" Unchecked="{x:Bind OnCheckedChanged}" />
+
+                                        <StackPanel Orientation="Vertical" Visibility="{x:Bind ComboBoxFieldVisibility}">
+                                            <TextBlock Text="{x:Bind Name}" FontSize="12" Opacity="0.7" />
+                                            <ComboBox ItemsSource="{x:Bind Options}" SelectedIndex="{x:Bind SelectedOptionIndex, Mode=TwoWay}"
+                                                      PlaceholderText="(nessuna selezione)" HorizontalAlignment="Stretch" />
+                                        </StackPanel>
+
+                                        <StackPanel Orientation="Vertical" Visibility="{x:Bind ListBoxFieldVisibility}">
+                                            <TextBlock Text="{x:Bind Name}" FontSize="12" Opacity="0.7" />
+                                            <ListView ItemsSource="{x:Bind Options}" SelectedIndex="{x:Bind SelectedOptionIndex, Mode=TwoWay}"
+                                                      SelectionMode="Single" MaxHeight="160" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" />
+                                        </StackPanel>
+
+                                        <Button Visibility="{x:Bind ButtonFieldVisibility}" Content="{x:Bind Name}"
+                                                Click="{x:Bind OnButtonClicked}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
 
                                         <StackPanel Orientation="Vertical" Visibility="{x:Bind ReadOnlyFieldVisibility}">
                                             <TextBlock FontSize="12" Opacity="0.7">
@@ -176,13 +204,36 @@
                                                                  Text="{x:Bind Value, Mode=OneWay}" TextChanged="{x:Bind OnTextChanged}" LostFocus="{x:Bind CommitText}"
                                                                  ToolTipService.ToolTip="{x:Bind Name}" />
 
+                                                        <!--
+                                                            CornerRadius switches this same frame
+                                                            between a checkbox's square and a radio
+                                                            button's circle (OverlayCornerRadius,
+                                                            computed alongside the rest of the
+                                                            overlay's geometry in UpdateOverlay) -
+                                                            a radio group only reads as "exactly
+                                                            one of these" when its options actually
+                                                            look like radio buttons. The checkmark
+                                                            glyph is a checkbox's own "on" mark; the
+                                                            filled dot is a radio button's - only
+                                                            one of the two is ever visible for a
+                                                            given field (CheckedGlyphVisibility/
+                                                            CheckedDotVisibility both factor in the
+                                                            field's own type, not just IsChecked).
+                                                        -->
                                                         <Border Visibility="{x:Bind CheckableFieldVisibility}"
                                                                 Background="White" BorderBrush="#FF2683DB" BorderThickness="1.5"
+                                                                CornerRadius="{x:Bind OverlayCornerRadius, Mode=OneWay}"
                                                                 Tapped="{x:Bind OnOverlayCheckTapped}" ToolTipService.ToolTip="{x:Bind Name}">
-                                                            <FontIcon Glyph="&#xE73E;" Foreground="#FF2683DB"
-                                                                      FontSize="{x:Bind OverlayFontSize, Mode=OneWay}"
-                                                                      Visibility="{x:Bind CheckedGlyphVisibility, Mode=OneWay}"
-                                                                      HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                            <Grid>
+                                                                <FontIcon Glyph="&#xE73E;" Foreground="#FF2683DB"
+                                                                          FontSize="{x:Bind OverlayFontSize, Mode=OneWay}"
+                                                                          Visibility="{x:Bind CheckedGlyphVisibility, Mode=OneWay}"
+                                                                          HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                                <Ellipse Fill="#FF2683DB"
+                                                                         Width="{x:Bind OverlayFontSize, Mode=OneWay}" Height="{x:Bind OverlayFontSize, Mode=OneWay}"
+                                                                         Visibility="{x:Bind CheckedDotVisibility, Mode=OneWay}"
+                                                                         HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                            </Grid>
                                                         </Border>
 
                                                     </Grid>

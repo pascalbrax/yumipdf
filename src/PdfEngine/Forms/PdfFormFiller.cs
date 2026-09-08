@@ -235,6 +235,50 @@ public sealed class PdfFormFiller : IDisposable
         });
     }
 
+    /// <summary>Lists a <see cref="PdfFormFieldType.ComboBox"/>/<see cref="PdfFormFieldType.ListBox"/> field's selectable option labels, in order.</summary>
+    public IReadOnlyList<string> GetOptions(PdfFormField field)
+    {
+        ThrowIfDisposed();
+        return PdfiumRuntime.Invoke(() =>
+        {
+            var page = EnsurePageOpen(field.PageIndex);
+            var annot = EnsureAnnotOpen(page, field);
+
+            var count = PdfiumNative.FPDFAnnot_GetOptionCount(_formHandle, annot);
+            var options = new List<string>(Math.Max(0, count));
+            for (var i = 0; i < count; i++)
+            {
+                var index = i;
+                options.Add(ReadUtf16String((buf, len) => PdfiumNative.FPDFAnnot_GetOptionLabel(_formHandle, annot, index, buf, len)));
+            }
+
+            return options;
+        });
+    }
+
+    /// <summary>The 0-based indices currently selected in a <see cref="PdfFormFieldType.ComboBox"/>/<see cref="PdfFormFieldType.ListBox"/> field (0 or 1 entries for a combo box, 0+ for a multi-select list box).</summary>
+    public IReadOnlyList<int> GetSelectedOptionIndices(PdfFormField field)
+    {
+        ThrowIfDisposed();
+        return PdfiumRuntime.Invoke(() =>
+        {
+            var page = EnsurePageOpen(field.PageIndex);
+            var annot = EnsureAnnotOpen(page, field);
+
+            var count = PdfiumNative.FPDFAnnot_GetOptionCount(_formHandle, annot);
+            var selected = new List<int>();
+            for (var i = 0; i < count; i++)
+            {
+                if (PdfiumNative.FPDFAnnot_IsOptionSelected(_formHandle, annot, i))
+                {
+                    selected.Add(i);
+                }
+            }
+
+            return selected;
+        });
+    }
+
     /// <summary>Enumerates AcroForm widget fields across every page.</summary>
     public IReadOnlyList<PdfFormField> ListFields()
     {
@@ -315,10 +359,41 @@ public sealed class PdfFormFiller : IDisposable
         if (field.Type != PdfFormFieldType.Text)
         {
             throw new NotSupportedException(
-                $"SetFieldValueAndRender supporta solo campi di testo. Il campo '{field.Name}' è di tipo {field.Type}: usare SetCheckedAndRender per CheckBox/RadioButton.");
+                $"SetFieldValueAndRender supporta solo campi di testo. Il campo '{field.Name}' è di tipo {field.Type}: usare SetCheckedAndRender per CheckBox/RadioButton, SetComboSelectionAndRender per ComboBox.");
         }
 
-        return RunOnFieldAnnotAndRender(field, pixelWidth, pixelHeight, (page, annot) =>
+        return ReplaceTextAndRender(field, newValue, pixelWidth, pixelHeight);
+    }
+
+    /// <summary>
+    /// Sets a <see cref="PdfFormFieldType.ComboBox"/>'s selected value by <paramref name="optionLabel"/>
+    /// (one of <see cref="GetOptions"/>'s entries).
+    /// </summary>
+    /// <remarks>
+    /// Confirmed live that the exact same focus/select-all/replace-selection/kill-focus
+    /// sequence <see cref="SetFieldValueAndRender"/> uses for text fields works for combo boxes
+    /// too - a combo box's value is fundamentally text, just constrained by its own drop-down
+    /// UI to the option labels in practice (PDFium enforces nothing here; passing a label not
+    /// in <see cref="GetOptions"/> would just set an off-list value, so callers should only ever
+    /// pass one of those labels back).
+    /// </remarks>
+    public byte[] SetComboSelectionAndRender(PdfFormField field, string optionLabel, int pixelWidth, int pixelHeight)
+    {
+        ArgumentNullException.ThrowIfNull(field);
+        ArgumentNullException.ThrowIfNull(optionLabel);
+        ThrowIfDisposed();
+
+        if (field.Type != PdfFormFieldType.ComboBox)
+        {
+            throw new NotSupportedException(
+                $"SetComboSelectionAndRender supporta solo ComboBox. Il campo '{field.Name}' è di tipo {field.Type}.");
+        }
+
+        return ReplaceTextAndRender(field, optionLabel, pixelWidth, pixelHeight);
+    }
+
+    private byte[] ReplaceTextAndRender(PdfFormField field, string newValue, int pixelWidth, int pixelHeight)
+        => RunOnFieldAnnotAndRender(field, pixelWidth, pixelHeight, (page, annot) =>
         {
             if (!PdfiumNative.FORM_SetFocusedAnnot(_formHandle, annot))
             {
@@ -331,6 +406,91 @@ public sealed class PdfFormFiller : IDisposable
             _replaceSelectionBuffers.Add(textBuffer);
             PdfiumNative.FORM_ReplaceSelection(_formHandle, page, textBuffer);
             PdfiumNative.FORM_ForceToKillFocus(_formHandle);
+        });
+
+    /// <summary>
+    /// Selects the option at <paramref name="optionIndex"/> in a <see cref="PdfFormFieldType.ListBox"/>
+    /// field (indices refer into <see cref="GetOptions"/>'s ordered label list) by simulating a
+    /// click at that row's position within the widget's own rectangle.
+    /// </summary>
+    /// <remarks>
+    /// Unlike a checkbox/radio click, a list box row selection does not stick on its own:
+    /// confirmed live that <see cref="GetSelectedOptionIndices"/> kept reporting nothing
+    /// selected right after the click, and only reflected it once <c>FORM_ForceToKillFocus</c>
+    /// ran afterwards - the same explicit commit step text fields need, that
+    /// <see cref="ReplaceTextAndRender"/> already calls for exactly this reason.
+    /// </remarks>
+    public byte[] SetListSelectionAndRender(PdfFormField field, int optionIndex, int pixelWidth, int pixelHeight)
+    {
+        ArgumentNullException.ThrowIfNull(field);
+        ThrowIfDisposed();
+
+        if (field.Type != PdfFormFieldType.ListBox)
+        {
+            throw new NotSupportedException(
+                $"SetListSelectionAndRender supporta solo ListBox. Il campo '{field.Name}' è di tipo {field.Type}.");
+        }
+
+        return RunOnFieldAnnotAndRender(field, pixelWidth, pixelHeight, (page, annot) =>
+        {
+            var count = PdfiumNative.FPDFAnnot_GetOptionCount(_formHandle, annot);
+            if (optionIndex < 0 || optionIndex >= count)
+            {
+                throw new ArgumentOutOfRangeException(nameof(optionIndex));
+            }
+
+            var rect = new PdfiumNative.FS_RECTF();
+            if (!PdfiumNative.FPDFAnnot_GetRect(annot, ref rect))
+            {
+                throw new PdfException(PdfErrorCode.Unknown, $"Impossibile leggere l'area del campo '{field.Name}'.");
+            }
+
+            var rowHeight = (rect.Top - rect.Bottom) / count;
+            var x = (rect.Left + rect.Right) / 2.0;
+            var y = rect.Top - rowHeight * (optionIndex + 0.5);
+
+            PdfiumNative.FORM_OnMouseMove(_formHandle, page, 0, x, y);
+            PdfiumNative.FORM_OnLButtonDown(_formHandle, page, 0, x, y);
+            PdfiumNative.FORM_OnLButtonUp(_formHandle, page, 0, x, y);
+            PdfiumNative.FORM_ForceToKillFocus(_formHandle);
+        });
+    }
+
+    /// <summary>
+    /// Clicks a <see cref="PdfFormFieldType.PushButton"/> at the center of its own rectangle -
+    /// whatever action is attached to it (a "Reset Form" action, most commonly) runs as part of
+    /// PDFium's own click handling, the same as it would for a real user's mouse click.
+    /// </summary>
+    /// <remarks>
+    /// A reset action can change *other* fields' values, not just this button's own (there is
+    /// no such thing as a push button's "value") - callers must re-read every field afterwards
+    /// (<see cref="ListFields"/>) rather than assuming only this one field could have changed.
+    /// </remarks>
+    public byte[] ClickButtonAndRender(PdfFormField field, int pixelWidth, int pixelHeight)
+    {
+        ArgumentNullException.ThrowIfNull(field);
+        ThrowIfDisposed();
+
+        if (field.Type != PdfFormFieldType.PushButton)
+        {
+            throw new NotSupportedException(
+                $"ClickButtonAndRender supporta solo PushButton. Il campo '{field.Name}' è di tipo {field.Type}.");
+        }
+
+        return RunOnFieldAnnotAndRender(field, pixelWidth, pixelHeight, (page, annot) =>
+        {
+            var rect = new PdfiumNative.FS_RECTF();
+            if (!PdfiumNative.FPDFAnnot_GetRect(annot, ref rect))
+            {
+                throw new PdfException(PdfErrorCode.Unknown, $"Impossibile leggere l'area del campo '{field.Name}'.");
+            }
+
+            var x = (rect.Left + rect.Right) / 2.0;
+            var y = (rect.Top + rect.Bottom) / 2.0;
+
+            PdfiumNative.FORM_OnMouseMove(_formHandle, page, 0, x, y);
+            PdfiumNative.FORM_OnLButtonDown(_formHandle, page, 0, x, y);
+            PdfiumNative.FORM_OnLButtonUp(_formHandle, page, 0, x, y);
         });
     }
 

@@ -287,7 +287,16 @@ public partial class MainViewModel : ObservableObject, IDisposable
             _formFiller = filler;
             foreach (var field in fields)
             {
-                FormFields.Add(new FormFieldEntryViewModel(field, this));
+                if (field.Type is PdfFormFieldType.ComboBox or PdfFormFieldType.ListBox)
+                {
+                    var options = filler.GetOptions(field);
+                    var selected = filler.GetSelectedOptionIndices(field);
+                    FormFields.Add(new FormFieldEntryViewModel(field, this, options, selected));
+                }
+                else
+                {
+                    FormFields.Add(new FormFieldEntryViewModel(field, this));
+                }
             }
         }
         catch (PdfException)
@@ -310,6 +319,47 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public Task ApplyFieldCheckedAsync(FormFieldEntryViewModel entry)
         => EnqueueFieldEditAsync(entry.Field.PageIndex, entry.Field.Name,
             (formFiller, w, h) => formFiller.SetCheckedAndRender(entry.Field, entry.IsChecked, w, h));
+
+    /// <summary>Commits a combo box's newly picked option and re-renders its page.</summary>
+    public Task ApplyComboSelectionAsync(FormFieldEntryViewModel entry)
+        => EnqueueFieldEditAsync(entry.Field.PageIndex, entry.Field.Name,
+            (formFiller, w, h) => formFiller.SetComboSelectionAndRender(entry.Field, entry.Options[entry.SelectedOptionIndex], w, h));
+
+    /// <summary>Commits a list box's newly picked option and re-renders its page.</summary>
+    public Task ApplyListSelectionAsync(FormFieldEntryViewModel entry)
+        => EnqueueFieldEditAsync(entry.Field.PageIndex, entry.Field.Name,
+            (formFiller, w, h) => formFiller.SetListSelectionAndRender(entry.Field, entry.SelectedOptionIndex, w, h));
+
+    /// <summary>
+    /// Clicks a push button and re-renders its page - then, since the button's action (a
+    /// "Reset Form" action, most commonly) can change any field's value, re-reads every field
+    /// from the document and syncs each <see cref="FormFieldEntryViewModel"/> to match, rather
+    /// than assuming only this one field could have changed.
+    /// </summary>
+    public async Task ApplyButtonClickAsync(FormFieldEntryViewModel entry)
+    {
+        await EnqueueFieldEditAsync(entry.Field.PageIndex, entry.Field.Name,
+            (formFiller, w, h) => formFiller.ClickButtonAndRender(entry.Field, w, h)).ConfigureAwait(true);
+
+        var formFiller = _formFiller;
+        if (formFiller is null)
+        {
+            return;
+        }
+
+        var freshFields = await Task.Run(() => formFiller.ListFields()).ConfigureAwait(true);
+        foreach (var field in FormFields)
+        {
+            foreach (var fresh in freshFields)
+            {
+                if (fresh.PageIndex == field.Field.PageIndex && fresh.AnnotIndex == field.Field.AnnotIndex)
+                {
+                    field.SyncFromField(fresh);
+                    break;
+                }
+            }
+        }
+    }
 
     /// <summary>
     /// Queues a field edit (+ the page re-render it requires) strictly behind whatever is

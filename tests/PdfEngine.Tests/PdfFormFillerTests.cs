@@ -40,4 +40,34 @@ public class PdfFormFillerTests
 
         Assert.Throws<NotSupportedException>(() => filler.SetCheckedAndRender(fakeTextField, true, 10, 10));
     }
+
+    [Fact]
+    public void SetComboSelectionAndRender_OnNonComboField_Throws()
+    {
+        using var document = PdfDocument.CreateEmpty();
+        using var filler = new PdfFormFiller(document);
+        var fakeTextField = new PdfFormField(0, 0, "fake", PdfFormFieldType.Text, "", IsChecked: false, IsMultiline: false, 0, 0, 0, 0);
+
+        Assert.Throws<NotSupportedException>(() => filler.SetComboSelectionAndRender(fakeTextField, "x", 10, 10));
+    }
+
+    [Fact]
+    public void SetListSelectionAndRender_OnNonListField_Throws()
+    {
+        using var document = PdfDocument.CreateEmpty();
+        using var filler = new PdfFormFiller(document);
+        var fakeTextField = new PdfFormField(0, 0, "fake", PdfFormFieldType.Text, "", IsChecked: false, IsMultiline: false, 0, 0, 0, 0);
+
+        Assert.Throws<NotSupportedException>(() => filler.SetListSelectionAndRender(fakeTextField, 0, 10, 10));
+    }
+
+    [Fact]
+    public void ClickButtonAndRender_OnNonButtonField_Throws()
+    {
+        using var document = PdfDocument.CreateEmpty();
+        using var filler = new PdfFormFiller(document);
+        var fakeTextField = new PdfFormField(0, 0, "fake", PdfFormFieldType.Text, "", IsChecked: false, IsMultiline: false, 0, 0, 0, 0);
+
+        Assert.Throws<NotSupportedException>(() => filler.ClickButtonAndRender(fakeTextField, 10, 10));
+    }
 }

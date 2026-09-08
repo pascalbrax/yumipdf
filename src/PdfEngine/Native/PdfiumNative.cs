@@ -286,6 +286,17 @@ internal static class PdfiumNative
     public static extern uint FPDFAnnot_GetFormFieldName(
         IntPtr formHandle, IntPtr annot, byte[]? buffer, uint buflen);
 
+    // ---- ComboBox/ListBox options (fpdf_annot.h) - read-only, annotation-level ------------
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern int FPDFAnnot_GetOptionCount(IntPtr formHandle, IntPtr annot);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern uint FPDFAnnot_GetOptionLabel(
+        IntPtr formHandle, IntPtr annot, int index, byte[]? buffer, uint buflen);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern bool FPDFAnnot_IsOptionSelected(IntPtr formHandle, IntPtr annot, int index);
+
     [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
     public static extern uint FPDFAnnot_GetFormFieldValue(
         IntPtr formHandle, IntPtr annot, byte[]? buffer, uint buflen);
