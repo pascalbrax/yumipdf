@@ -59,7 +59,8 @@
 
                                         <StackPanel Orientation="Vertical" Visibility="{x:Bind TextFieldVisibility}">
                                             <TextBlock Text="{x:Bind Name}" FontSize="12" Opacity="0.7" />
-                                            <TextBox Text="{x:Bind Value, Mode=OneWay}" TextChanged="{x:Bind OnTextChanged}" LostFocus="{x:Bind CommitText}" />
+                                            <TextBox Text="{x:Bind Value, Mode=OneWay}" TextChanged="{x:Bind OnTextChanged}" LostFocus="{x:Bind CommitText}"
+                                                     AcceptsReturn="{x:Bind IsMultiline}" TextWrapping="{x:Bind OverlayTextWrapping}" />
                                         </StackPanel>
 
                                         <CheckBox Visibility="{x:Bind CheckableFieldVisibility}" Content="{x:Bind Name}"
@@ -169,7 +170,8 @@
                                                         -->
                                                         <TextBox Visibility="{x:Bind TextFieldVisibility}"
                                                                  Background="White" BorderBrush="#FF2683DB" BorderThickness="1.5"
-                                                                 Padding="2,0" MinHeight="0" MinWidth="0" VerticalContentAlignment="Center"
+                                                                 Padding="2,0" MinHeight="0" MinWidth="0" VerticalContentAlignment="{x:Bind OverlayVerticalContentAlignment}"
+                                                                 AcceptsReturn="{x:Bind IsMultiline}" TextWrapping="{x:Bind OverlayTextWrapping}"
                                                                  FontSize="{x:Bind OverlayFontSize, Mode=OneWay}"
                                                                  Text="{x:Bind Value, Mode=OneWay}" TextChanged="{x:Bind OnTextChanged}" LostFocus="{x:Bind CommitText}"
                                                                  ToolTipService.ToolTip="{x:Bind Name}" />

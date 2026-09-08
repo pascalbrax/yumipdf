@@ -26,7 +26,7 @@ public class PdfFormFillerTests
     {
         using var document = PdfDocument.CreateEmpty();
         using var filler = new PdfFormFiller(document);
-        var fakeCheckboxField = new PdfFormField(0, 0, "fake", PdfFormFieldType.CheckBox, "Off", IsChecked: false, 0, 0, 0, 0);
+        var fakeCheckboxField = new PdfFormField(0, 0, "fake", PdfFormFieldType.CheckBox, "Off", IsChecked: false, IsMultiline: false, 0, 0, 0, 0);
 
         Assert.Throws<NotSupportedException>(() => filler.SetFieldValueAndRender(fakeCheckboxField, "x", 10, 10));
     }
@@ -36,7 +36,7 @@ public class PdfFormFillerTests
     {
         using var document = PdfDocument.CreateEmpty();
         using var filler = new PdfFormFiller(document);
-        var fakeTextField = new PdfFormField(0, 0, "fake", PdfFormFieldType.Text, "", IsChecked: false, 0, 0, 0, 0);
+        var fakeTextField = new PdfFormField(0, 0, "fake", PdfFormFieldType.Text, "", IsChecked: false, IsMultiline: false, 0, 0, 0, 0);
 
         Assert.Throws<NotSupportedException>(() => filler.SetCheckedAndRender(fakeTextField, true, 10, 10));
     }

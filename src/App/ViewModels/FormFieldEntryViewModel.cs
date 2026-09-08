@@ -32,6 +32,18 @@ public partial class FormFieldEntryViewModel : ObservableObject
 
     public bool IsTextField => Field.Type == PdfFormFieldType.Text;
 
+    /// <summary>Whether Enter should insert a line break instead of doing nothing - the AcroForm "Multiline" flag. Only meaningful when <see cref="IsTextField"/>.</summary>
+    public bool IsMultiline => Field.IsMultiline;
+
+    // TextWrapping.NoWrap is the TextBox default already, but exposing it explicitly here
+    // (rather than only setting Wrap conditionally in XAML) keeps this alongside IsMultiline -
+    // one place per field deciding "is this a multi-line editor" instead of two properties that
+    // have to be kept in sync in the XAML by hand.
+    public Microsoft.UI.Xaml.TextWrapping OverlayTextWrapping => IsMultiline ? Microsoft.UI.Xaml.TextWrapping.Wrap : Microsoft.UI.Xaml.TextWrapping.NoWrap;
+
+    /// <summary>Centering a single-line value in its (short) overlay box looks right; centering several lines of wrapped text in a tall multi-line box does not - text should start at the top instead.</summary>
+    public VerticalAlignment OverlayVerticalContentAlignment => IsMultiline ? VerticalAlignment.Top : VerticalAlignment.Center;
+
     public bool IsCheckableField => Field.Type is PdfFormFieldType.CheckBox or PdfFormFieldType.RadioButton;
 
     /// <summary>Push buttons, signatures, combo/list boxes: shown read-only - see docs/ROADMAP.md M2 for what's not covered yet.</summary>

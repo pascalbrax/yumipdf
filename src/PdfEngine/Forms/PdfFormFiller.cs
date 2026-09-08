@@ -17,9 +17,10 @@ public enum PdfFormFieldType
 }
 
 /// <param name="IsChecked">Only meaningful for <see cref="PdfFormFieldType.CheckBox"/>/<see cref="PdfFormFieldType.RadioButton"/> - <c>false</c> for every other type.</param>
+/// <param name="IsMultiline">Only meaningful for <see cref="PdfFormFieldType.Text"/> - the AcroForm "Multiline" flag (bit 13 of /Ff), so a caller's text editor can accept Enter/wrap instead of treating the field as single-line.</param>
 /// <param name="RectLeft">Widget rectangle in PDF points (1/72 inch, origin bottom-left of the page) - lets a caller draw an on-page overlay (highlight frame, in-place editor) at the field's exact position.</param>
 public sealed record PdfFormField(
-    int PageIndex, int AnnotIndex, string Name, PdfFormFieldType Type, string Value, bool IsChecked,
+    int PageIndex, int AnnotIndex, string Name, PdfFormFieldType Type, string Value, bool IsChecked, bool IsMultiline,
     float RectLeft, float RectBottom, float RectRight, float RectTop);
 
 /// <summary>
@@ -267,12 +268,14 @@ public sealed class PdfFormFiller : IDisposable
                         var value = ReadUtf16String((buf, len) => PdfiumNative.FPDFAnnot_GetFormFieldValue(_formHandle, annot, buf, len));
                         var isChecked = type is PdfFormFieldType.CheckBox or PdfFormFieldType.RadioButton
                             && PdfiumNative.FPDFAnnot_IsChecked(_formHandle, annot);
+                        var isMultiline = type == PdfFormFieldType.Text
+                            && (PdfiumNative.FPDFAnnot_GetFormFieldFlags(_formHandle, annot) & PdfiumNative.FormFieldFlagMultiline) != 0;
 
                         var rect = new PdfiumNative.FS_RECTF();
                         PdfiumNative.FPDFAnnot_GetRect(annot, ref rect);
 
                         fields.Add(new PdfFormField(
-                            pageIndex, annotIndex, name, type, value, isChecked,
+                            pageIndex, annotIndex, name, type, value, isChecked, isMultiline,
                             rect.Left, rect.Bottom, rect.Right, rect.Top));
                     }
                     finally
@@ -339,6 +342,18 @@ public sealed class PdfFormFiller : IDisposable
     /// A no-op edit (but still rendered) if the field is already in the requested state
     /// (clicking an already-checked checkbox would otherwise toggle it back off).
     /// </summary>
+    /// <remarks>
+    /// Selecting a second option in a radio group did nothing - the first click (selecting
+    /// option A) worked, but a second click selecting option B, in the same page-view session,
+    /// left both options unselected or A still selected, depending on the exact sequence -
+    /// confirmed live against a real form with a two-option radio group. <c>FORM_OnLButtonDown</c>/
+    /// <c>Up</c> hit-test purely by (x, y): they take no annotation handle, so PDFium has to
+    /// resolve "which widget is under this point" itself, and that resolution turned out to
+    /// depend on <c>FORM_OnMouseMove</c> having been called first - without it, PDFium's
+    /// internal hover/hit-test state apparently stayed pinned to wherever the *previous* click
+    /// left it. A real user's mouse always generates move events before a click; simulating
+    /// only the down/up pair skipped a step PDFium's interactive layer depends on.
+    /// </remarks>
     public byte[] SetCheckedAndRender(PdfFormField field, bool isChecked, int pixelWidth, int pixelHeight)
     {
         ArgumentNullException.ThrowIfNull(field);
@@ -366,6 +381,7 @@ public sealed class PdfFormFiller : IDisposable
             var x = (rect.Left + rect.Right) / 2.0;
             var y = (rect.Top + rect.Bottom) / 2.0;
 
+            PdfiumNative.FORM_OnMouseMove(_formHandle, page, 0, x, y);
             PdfiumNative.FORM_OnLButtonDown(_formHandle, page, 0, x, y);
             PdfiumNative.FORM_OnLButtonUp(_formHandle, page, 0, x, y);
         });

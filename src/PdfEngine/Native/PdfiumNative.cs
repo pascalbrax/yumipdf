@@ -275,6 +275,13 @@ internal static class PdfiumNative
     [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
     public static extern int FPDFAnnot_GetFormFieldType(IntPtr formHandle, IntPtr annot);
 
+    // Raw /Ff field flags (PDF 32000-1:2008 table 228/229). Bit 13 (1 << 12, value 4096) is
+    // "Multiline" for text fields - the one flag this project currently reads.
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern int FPDFAnnot_GetFormFieldFlags(IntPtr formHandle, IntPtr annot);
+
+    public const int FormFieldFlagMultiline = 1 << 12;
+
     [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
     public static extern uint FPDFAnnot_GetFormFieldName(
         IntPtr formHandle, IntPtr annot, byte[]? buffer, uint buflen);
@@ -319,6 +326,9 @@ internal static class PdfiumNative
     // change them is to simulate the mouse click a real user would make (PDFium's internal
     // AcroForm widget handling takes care of toggling the checked state, and - for radio
     // buttons - unchecking any sibling in the same group).
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern bool FORM_OnMouseMove(IntPtr formHandle, IntPtr page, int modifier, double pageX, double pageY);
+
     [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
     public static extern bool FORM_OnLButtonDown(IntPtr formHandle, IntPtr page, int modifier, double pageX, double pageY);
 
