@@ -30,6 +30,10 @@
 - [ ] Combo box (editabili) e list box - nessuna copertura ancora, il PDF di test non ne conteneva; combo editabili dovrebbero seguire lo stesso percorso testuale di `SetFieldValue`, ma non verificato. Nel pannello sono mostrati in sola lettura
 - [ ] Fixture di test AcroForm inclusa nel repository per `PdfEngine.Tests` (oggi la verifica di scrittura è manuale contro un documento reale non incluso nel repo)
 
+## Stampa
+- [x] I campi compilati e non ancora appiattiti vengono stampati (la stampa usa lo stesso render della vista)
+- [ ] Anteprima di stampa nel dialogo - **posticipata**. Percorso individuato: stampa nativa Windows (`PrintManagerInterop` + `Microsoft.UI.Xaml.Printing.PrintDocument`, entrambi presenti in Windows App SDK 2.3.1 - la nota in ARCHITECTURE.md "Stampa: perché non l'API di stampa WinRT" è superata). Prima di iniziare: prova rapida (2-4 h) che il pannello si apra da app WinUI3 non pacchettizzata. Da sistemare comunque, con o senza anteprima: la stampa GDI tiene pinnati i buffer di tutte le pagine per l'intero lavoro (~139 MB/pagina A4 a 600 dpi) e stira la pagina sull'intero foglio ignorando margini e proporzioni
+
 ## M3 - Editor / annotazioni avanzate
 - [ ] Nota/testo libero, disegno a mano libera (ink), timbro
 - [ ] Editing di testo/immagini esistenti nella pagina (fuori scope M0-M2; da valutare se resti su PDFium o richieda una libreria aggiuntiva)

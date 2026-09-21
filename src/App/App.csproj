@@ -12,7 +12,7 @@
          "PDF26" starts with a letter, so it does not hit that bug. -->
     <AssemblyName>PDF26</AssemblyName>
     <Product>PDF26</Product>
-    <ApplicationIcon />
+    <ApplicationIcon>Assets\AppIcon.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <UseWinUI>true</UseWinUI>
     <Nullable>enable</Nullable>
@@ -39,6 +39,11 @@
   <ItemGroup>
     <ProjectReference Include="..\PdfEngine\PdfEngine.csproj" />
     <ProjectReference Include="..\Printing\Printing.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Also shipped next to the exe: AppWindow.SetIcon (see Services/WindowIcon) loads it from disk at runtime. -->
+    <Content Include="Assets\AppIcon.ico" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

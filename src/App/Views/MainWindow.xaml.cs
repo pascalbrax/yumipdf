@@ -20,6 +20,7 @@ public sealed partial class MainWindow : Window
         _initialSource = initialSource;
         InitializeComponent();
         Title = "PDF26";
+        WindowIcon.Apply(this);
 
         ViewModel.PropertyChanged += OnViewModelPropertyChanged;
 
