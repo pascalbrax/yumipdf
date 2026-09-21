@@ -1,0 +1,2 @@
+# PDF fixtures are byte-exact: their xref offsets break if line endings are rewritten.
+*.pdf binary
