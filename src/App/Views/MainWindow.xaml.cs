@@ -16,6 +16,7 @@ public sealed partial class MainWindow : Window
     /// <summary>How long after the window itself scrolls the document to a page (an animated scroll) the scroll position is not read back as "the user moved to another page".</summary>
     private const long ProgrammaticScrollGraceMilliseconds = 800;
 
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _refitTimer;
     private long _ignoreScrollSyncUntil;
     private bool _syncingFromScroll;
 
@@ -30,6 +31,7 @@ public sealed partial class MainWindow : Window
 
         ViewModel.PropertyChanged += OnViewModelPropertyChanged;
         PagesScrollViewer.ViewChanged += OnPagesViewChanged;
+        PagesScrollViewer.SizeChanged += OnPagesViewportSizeChanged;
         ThumbnailStrip.PageActivated += OnThumbnailPageActivated;
         ThumbnailStrip.CenterPageChanged += (_, pageIndex) => ViewModel.SetThumbnailFocus(pageIndex);
         UpdateThumbnailHandleGlyph();
@@ -212,16 +214,48 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private async void OnFitWidthClicked(object sender, RoutedEventArgs e)
+    private async void OnFitWidthClicked(object sender, RoutedEventArgs e) => await FitWidthToViewportAsync();
+
+    /// <summary>Fits the widest page to the room the pages currently have - see <see cref="MainViewModel.FitWidthAsync"/> for why the widest.</summary>
+    private Task FitWidthToViewportAsync()
     {
         if (ViewModel.Pages.Count == 0)
+        {
+            return Task.CompletedTask;
+        }
+
+        var widestPagePoints = ViewModel.Pages.Max(page => page.PointWidth);
+        return ViewModel.FitWidthAsync(PagesScrollViewer.ViewportWidth, widestPagePoints);
+    }
+
+    /// <summary>
+    /// While "fit width" is on, follows the pages' room changing (thumbnail strip or form panel
+    /// opening/closing, window resize). Debounced: a pane animation or a window drag fires this
+    /// many times, and only where it settles matters.
+    /// </summary>
+    private void OnPagesViewportSizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (!ViewModel.IsFitWidthActive || Math.Abs(e.NewSize.Width - e.PreviousSize.Width) < 0.5)
         {
             return;
         }
 
-        var firstPage = ViewModel.Pages[0];
-        var pageWidthPoints = firstPage.PixelWidth / ViewModel.Zoom;
-        await ViewModel.FitWidthAsync(PagesScrollViewer.ViewportWidth, pageWidthPoints);
+        if (_refitTimer is null)
+        {
+            _refitTimer = DispatcherQueue.CreateTimer();
+            _refitTimer.Interval = TimeSpan.FromMilliseconds(150);
+            _refitTimer.IsRepeating = false;
+            _refitTimer.Tick += async (_, _) =>
+            {
+                if (ViewModel.IsFitWidthActive)
+                {
+                    await FitWidthToViewportAsync();
+                }
+            };
+        }
+
+        _refitTimer.Stop();
+        _refitTimer.Start();
     }
 
     private async void OnFitPageClicked(object sender, RoutedEventArgs e)

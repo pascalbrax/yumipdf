@@ -212,6 +212,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             DocumentTitle = Path.GetFileName(localPath);
             PageCount = _document.PageCount;
             CurrentPageIndex = 0;
+            IsFitWidthActive = false;
             _maxZoomForDocument = ComputeMaxZoomForDocument(_document);
             Zoom = Math.Min(Zoom, _maxZoomForDocument);
 
@@ -253,9 +254,25 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private bool HasDocument() => _document is not null;
 
-    public Task SetZoomAsync(double zoom) => ApplyZoomAsync(Math.Clamp(zoom, MinZoom, _maxZoomForDocument));
+    /// <summary>A manual zoom: it ends "fit width" mode (see <see cref="IsFitWidthActive"/>).</summary>
+    public Task SetZoomAsync(double zoom)
+    {
+        IsFitWidthActive = false;
+        return ApplyZoomAsync(Math.Clamp(zoom, MinZoom, _maxZoomForDocument));
+    }
+
+    /// <summary>
+    /// <c>true</c> from "Adatta a larghezza" until the user zooms by hand, fits the page, or opens
+    /// another document. While it is on, the window re-fits whenever the room for the pages
+    /// changes (the thumbnail strip or the form panel opening/closing, the window being
+    /// resized): "fit width" is a mode the document stays in, not a one-off measurement that
+    /// the next change of layout silently invalidates - which left the page overflowing
+    /// the viewport, off-center, as soon as the thumbnail strip was opened.
+    /// </summary>
+    public bool IsFitWidthActive { get; private set; }
 
     /// <summary>Sets zoom so a page of <paramref name="pageWidthPoints"/> fills <paramref name="viewportWidthPixels"/> (minus a small margin).</summary>
+    /// <param name="pageWidthPoints">The <em>widest</em> page's width: every page then fits, and narrower ones are centered. The first page's width would leave a wider later page overflowing and the whole column off-center.</param>
     public Task FitWidthAsync(double viewportWidthPixels, double pageWidthPoints)
     {
         if (pageWidthPoints <= 0 || viewportWidthPixels <= 0)
@@ -263,6 +280,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             return Task.CompletedTask;
         }
 
+        IsFitWidthActive = true;
         const double margin = 32; // leaves breathing room so the page border isn't flush against the scrollbar
         return ApplyZoomAsync(Math.Clamp((viewportWidthPixels - margin) / pageWidthPoints, MinZoom, _maxZoomForDocument));
     }
@@ -275,6 +293,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             return Task.CompletedTask;
         }
 
+        IsFitWidthActive = false;
         const double margin = 32;
         var zoomForWidth = (viewportWidthPixels - margin) / pageWidthPoints;
         var zoomForHeight = (viewportHeightPixels - margin) / pageHeightPoints;
