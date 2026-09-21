@@ -5,6 +5,7 @@
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     xmlns:vm="using:Pdf26.ViewModels"
+    xmlns:local="using:Pdf26.Views"
     mc:Ignorable="d">
 
     <Grid RowDefinitions="Auto,*,Auto">
@@ -24,13 +25,29 @@
             <AppBarButton Label="Adatta a larghezza" Click="OnFitWidthClicked" />
             <AppBarButton Label="Adatta a pagina" Click="OnFitPageClicked" />
             <AppBarSeparator />
+            <AppBarToggleButton Icon="Pictures" Label="Miniature" IsChecked="{x:Bind ViewModel.IsThumbnailPanelOpen, Mode=TwoWay}"
+                                 Visibility="{x:Bind ViewModel.ThumbnailButtonVisibility, Mode=OneWay}" />
             <AppBarToggleButton Icon="Edit" Label="Compila modulo" IsChecked="{x:Bind ViewModel.IsFormPanelOpen, Mode=TwoWay}"
                                  Visibility="{x:Bind ViewModel.FormButtonVisibility, Mode=OneWay}" />
             <AppBarSeparator />
             <AppBarButton Icon="Setting" Label="Opzioni..." Click="OnSettingsClicked" />
         </CommandBar>
 
-        <SplitView Grid.Row="1" IsPaneOpen="{x:Bind ViewModel.IsFormPanelOpen, Mode=TwoWay}"
+        <!--
+            Left: the page-thumbnail strip (a vertical "Cover Flow"), collapsible. Only ever open
+            for a document with 3+ pages that has finished loading - see MainViewModel.IsThumbnailPaneOpen.
+        -->
+        <SplitView Grid.Row="1" x:Name="ThumbnailSplitView" IsPaneOpen="{x:Bind ViewModel.IsThumbnailPaneOpen, Mode=OneWay}"
+                   PanePlacement="Left" DisplayMode="Inline" OpenPaneLength="230">
+
+            <SplitView.Pane>
+                <local:CoverFlowStrip x:Name="ThumbnailStrip" />
+            </SplitView.Pane>
+
+            <SplitView.Content>
+                <Grid>
+
+        <SplitView IsPaneOpen="{x:Bind ViewModel.IsFormPanelOpen, Mode=TwoWay}"
                    PanePlacement="Right" DisplayMode="Inline" OpenPaneLength="340">
 
             <SplitView.Pane>
@@ -246,6 +263,21 @@
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
                 </ScrollViewer>
+            </SplitView.Content>
+
+        </SplitView>
+
+                    <!-- Handle on the strip's edge: the same open/close as the toolbar button. -->
+                    <Button x:Name="ThumbnailHandle" HorizontalAlignment="Left" VerticalAlignment="Center"
+                            Width="18" Height="72" Padding="0" CornerRadius="0,6,6,0"
+                            Visibility="{x:Bind ViewModel.ThumbnailButtonVisibility, Mode=OneWay}"
+                            Click="OnThumbnailHandleClicked"
+                            AutomationProperties.Name="Mostra o nascondi le miniature"
+                            ToolTipService.ToolTip="Miniature">
+                        <FontIcon x:Name="ThumbnailHandleGlyph" Glyph="&#xE76C;" FontSize="10" />
+                    </Button>
+
+                </Grid>
             </SplitView.Content>
 
         </SplitView>

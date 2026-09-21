@@ -32,6 +32,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private readonly FileSourceResolver _sourceResolver = new();
     private readonly SettingsService _settingsService = new();
+    private readonly AppSettings _settings;
+    private bool _restoringSettings;
     private PdfDocument? _document;
     private PdfFormFiller? _formFiller;
     private PdfSource? _lastResolvedSource;
@@ -121,13 +123,36 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     public MainViewModel()
     {
-        PageAreaBackground = new SolidColorBrush(ColorHex.Parse(_settingsService.Load().PageAreaBackgroundHex));
+        _settings = _settingsService.Load();
+        PageAreaBackground = new SolidColorBrush(ColorHex.Parse(_settings.PageAreaBackgroundHex));
+
+        _restoringSettings = true;
+        IsThumbnailPanelOpen = _settings.ThumbnailPanelOpen;
+        _restoringSettings = false;
     }
 
     public void UpdateBackgroundColor(Color color)
     {
         PageAreaBackground = new SolidColorBrush(color);
-        _settingsService.Save(new AppSettings { PageAreaBackgroundHex = ColorHex.ToHex(color) });
+        _settings.PageAreaBackgroundHex = ColorHex.ToHex(color);
+        SaveSettings();
+    }
+
+    /// <summary>
+    /// Always saves the one shared <see cref="_settings"/> object, never a fresh
+    /// <c>AppSettings</c> holding just the value that changed: that would silently reset every
+    /// other preference to its default. A settings file that cannot be written must not break
+    /// whatever the user just did, so IO errors are swallowed.
+    /// </summary>
+    private void SaveSettings()
+    {
+        try
+        {
+            _settingsService.Save(_settings);
+        }
+        catch (Exception)
+        {
+        }
     }
 
     public async Task<OpenOutcome> OpenAsync(PdfSource source, string? password = null, CancellationToken cancellationToken = default)
@@ -173,6 +198,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 return OpenOutcome.PasswordRequired;
             }
 
+            await StopThumbnailsAsync().ConfigureAwait(true);
+            Thumbnails = null;
+
             _formFiller?.Dispose();
             _formFiller = null;
             FormFields.Clear();
@@ -190,6 +218,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
             LoadFormFields(_document);
 
             await RenderAllPagesAsync(cancellationToken, isNewDocument: true);
+
+            // Thumbnails only start once the main view is completely populated - see BeginThumbnails.
+            BeginThumbnails(document);
             StatusMessage = null;
             return OpenOutcome.Success;
         }
@@ -366,6 +397,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 }
             }
         }
+
+        // A reset can change fields on any page, not just this button's own.
+        MarkAllThumbnailsDirty();
     }
 
     /// <summary>
@@ -430,6 +464,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             }
 
             placeholder.Bitmap = bitmap;
+            MarkThumbnailDirty(pageIndex);
             ProgressPercent = 100;
         }
         catch (Exception ex)
@@ -463,6 +498,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         if (flatten)
         {
+            await StopThumbnailsAsync().ConfigureAwait(true);
             _formFiller?.Dispose();
             _formFiller = null;
             FormFields.Clear();
@@ -497,6 +533,15 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             StatusMessage = $"Impossibile salvare il documento: {ex.Message}";
             return false;
+        }
+        finally
+        {
+            // Flattening bakes the field values into the pages: they look the same, but they are
+            // no longer drawn through the (now gone) form filler, so refresh every thumbnail.
+            if (flatten)
+            {
+                RestartThumbnails();
+            }
         }
     }
 
@@ -714,6 +759,241 @@ public partial class MainViewModel : ObservableObject, IDisposable
         return Math.Min(MaxZoom, SafeMaxPixelDimension / maxPointDimension);
     }
 
+    // ---- Thumbnails ---------------------------------------------------------------------
+
+    /// <summary>Below this many pages a thumbnail strip adds nothing over just scrolling the document.</summary>
+    private const int MinPagesForThumbnails = 3;
+
+    /// <summary>Pixels of a thumbnail's longer side: sharp enough for a high-DPI display at the strip's size, small enough that a whole document's worth stays cheap.</summary>
+    private const int ThumbnailLongSidePixels = 360;
+
+    private CancellationTokenSource? _thumbnailCts;
+    private Task _thumbnailLoop = Task.CompletedTask;
+    private bool _thumbnailLoopActive;
+    private readonly HashSet<int> _thumbnailPending = new();
+    private int _thumbnailFocusIndex;
+
+    /// <summary>
+    /// The current document's thumbnails; <c>null</c> until the main view has finished loading
+    /// it, and for documents with fewer than <see cref="MinPagesForThumbnails"/> pages - which is
+    /// also what keeps the whole strip (and its toolbar button) out of sight for those.
+    /// </summary>
+    [ObservableProperty]
+    public partial PdfThumbnailSet? Thumbnails { get; set; }
+
+    /// <summary>The user's choice for the strip (toolbar button/handle); remembered between sessions.</summary>
+    [ObservableProperty]
+    public partial bool IsThumbnailPanelOpen { get; set; }
+
+    public Visibility ThumbnailButtonVisibility => Thumbnails is not null ? Visibility.Visible : Visibility.Collapsed;
+
+    /// <summary>What the strip's <c>SplitView</c> actually shows: the user's choice, but never for a document without thumbnails.</summary>
+    public bool IsThumbnailPaneOpen => IsThumbnailPanelOpen && Thumbnails is not null;
+
+    partial void OnThumbnailsChanged(PdfThumbnailSet? value)
+    {
+        OnPropertyChanged(nameof(ThumbnailButtonVisibility));
+        OnPropertyChanged(nameof(IsThumbnailPaneOpen));
+    }
+
+    partial void OnIsThumbnailPanelOpenChanged(bool value)
+    {
+        OnPropertyChanged(nameof(IsThumbnailPaneOpen));
+        if (_restoringSettings)
+        {
+            return;
+        }
+
+        _settings.ThumbnailPanelOpen = value;
+        SaveSettings();
+    }
+
+    /// <summary>Tells the generator which page the strip is centered on, so the pages the user is about to look at are rendered first.</summary>
+    public void SetThumbnailFocus(int pageIndex) => _thumbnailFocusIndex = pageIndex;
+
+    /// <summary>
+    /// Starts thumbnail generation - deliberately only once the main view is completely
+    /// populated (every page has its bitmap), so thumbnails never compete with the first full
+    /// render of the document. A render that was cancelled or failed part-way leaves pages
+    /// without a bitmap, which is how this notices and stays out.
+    /// </summary>
+    private void BeginThumbnails(PdfDocument document)
+    {
+        if (!ReferenceEquals(document, _document)
+            || document.PageCount < MinPagesForThumbnails
+            || Pages.Count != document.PageCount
+            || Pages.Any(page => page.Bitmap is null))
+        {
+            return;
+        }
+
+        Thumbnails = new PdfThumbnailSet(Pages.Select(page => (page.PointWidth, page.PointHeight)));
+        _thumbnailFocusIndex = CurrentPageIndex;
+        RestartThumbnails();
+    }
+
+    /// <summary>Discards any generation in progress and queues every page again.</summary>
+    private void RestartThumbnails()
+    {
+        if (Thumbnails is null)
+        {
+            return;
+        }
+
+        _thumbnailCts?.Cancel();
+        _thumbnailCts = new CancellationTokenSource();
+
+        _thumbnailPending.Clear();
+        MarkAllThumbnailsDirty();
+    }
+
+    /// <summary>A page's content changed (a field was edited): render its thumbnail again.</summary>
+    private void MarkThumbnailDirty(int pageIndex)
+    {
+        if (Thumbnails is null || pageIndex < 0 || pageIndex >= Thumbnails.Count)
+        {
+            return;
+        }
+
+        _thumbnailPending.Add(pageIndex);
+        EnsureThumbnailLoop();
+    }
+
+    private void MarkAllThumbnailsDirty()
+    {
+        if (Thumbnails is null)
+        {
+            return;
+        }
+
+        for (var index = 0; index < Thumbnails.Count; index++)
+        {
+            _thumbnailPending.Add(index);
+        }
+
+        EnsureThumbnailLoop();
+    }
+
+    /// <summary>Cancels generation and waits for the in-flight page (at most one) to finish, so the document/filler can then be safely replaced or disposed.</summary>
+    private async Task StopThumbnailsAsync()
+    {
+        _thumbnailCts?.Cancel();
+        try
+        {
+            await _thumbnailLoop.ConfigureAwait(true);
+        }
+        catch
+        {
+            // The loop swallows its own errors; nothing to report from a cancelled one.
+        }
+
+        _thumbnailPending.Clear();
+    }
+
+    private void EnsureThumbnailLoop()
+    {
+        if (_thumbnailLoopActive
+            || _thumbnailPending.Count == 0
+            || Thumbnails is not { } set
+            || _document is not { } document
+            || _thumbnailCts is not { IsCancellationRequested: false } cts)
+        {
+            return;
+        }
+
+        _thumbnailLoopActive = true;
+        _thumbnailLoop = RunThumbnailLoopAsync(document, set, cts.Token);
+    }
+
+    /// <remarks>
+    /// "Separate thread" here means off the UI thread: each page is rendered by a thread-pool
+    /// task, one at a time, so the window stays responsive however many pages there are.
+    /// It cannot mean a second PDFium thread - the native library is not thread-safe in this
+    /// build, so every call still funnels through <c>PdfiumRuntime</c>'s single worker. One
+    /// page per call keeps each of those calls short: a zoom change or a field edit only ever
+    /// waits behind a single thumbnail. Pages are taken nearest-first around
+    /// <see cref="_thumbnailFocusIndex"/>, so the ones about to be shown come first.
+    /// </remarks>
+    private async Task RunThumbnailLoopAsync(PdfDocument document, PdfThumbnailSet set, CancellationToken token)
+    {
+        try
+        {
+            while (!token.IsCancellationRequested && TakeNextPendingThumbnail() is { } index)
+            {
+                try
+                {
+                    var formFiller = _formFiller;
+                    var (width, height) = ThumbnailPixelSize(set[index].AspectRatio);
+
+                    var bgra = await Task.Run(() => RenderPageBgra(document, formFiller, index, width, height), token)
+                        .ConfigureAwait(true);
+                    if (token.IsCancellationRequested)
+                    {
+                        break;
+                    }
+
+                    var bitmap = new WriteableBitmap(width, height);
+                    using (var stream = bitmap.PixelBuffer.AsStream())
+                    {
+                        stream.Write(bgra, 0, bgra.Length);
+                    }
+
+                    set.SetBitmap(index, bitmap);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+                catch (Exception)
+                {
+                    // A thumbnail is decoration: a page that cannot be rendered keeps its
+                    // numbered placeholder, and the rest carry on.
+                }
+            }
+        }
+        finally
+        {
+            _thumbnailLoopActive = false;
+
+            // A restart requested while this loop was still winding down found the loop
+            // "active" and could not start its own - take over for it.
+            if (token.IsCancellationRequested && _thumbnailCts is { IsCancellationRequested: false })
+            {
+                EnsureThumbnailLoop();
+            }
+        }
+    }
+
+    private int? TakeNextPendingThumbnail()
+    {
+        if (_thumbnailPending.Count == 0)
+        {
+            return null;
+        }
+
+        var best = -1;
+        var bestDistance = int.MaxValue;
+        foreach (var index in _thumbnailPending)
+        {
+            var distance = Math.Abs(index - _thumbnailFocusIndex);
+            if (distance < bestDistance || (distance == bestDistance && index > best))
+            {
+                best = index;
+                bestDistance = distance;
+            }
+        }
+
+        _thumbnailPending.Remove(best);
+        return best;
+    }
+
+    private static (int Width, int Height) ThumbnailPixelSize(double aspectRatio)
+    {
+        return aspectRatio >= 1
+            ? (Math.Max(1, (int)Math.Round(ThumbnailLongSidePixels / aspectRatio)), ThumbnailLongSidePixels)
+            : (ThumbnailLongSidePixels, Math.Max(1, (int)Math.Round(ThumbnailLongSidePixels * aspectRatio)));
+    }
+
     partial void OnCurrentPageIndexChanged(int value)
     {
         PreviousPageCommand.NotifyCanExecuteChanged();
@@ -723,6 +1003,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public void Dispose()
     {
         _renderCts?.Cancel();
+        _thumbnailCts?.Cancel();
         _formFiller?.Dispose();
         _formFiller = null;
         _document?.Dispose();

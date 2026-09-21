@@ -195,6 +195,40 @@ con `Microsoft.UI.Xaml.UIElement` di WinUI3. Per questo `src/Printing` usa `Syst
 `PdfPage.RenderToBgra`) sul contesto grafico di stampa. È in un progetto separato perché
 `UseWinUI` e `UseWindowsForms` nello stesso `.csproj` mandano in conflitto il compilatore XAML.
 
+## Miniature: Cover Flow verticale e thread
+
+`Views/CoverFlowStrip` è la zona a scomparsa a sinistra (`SplitView` esterno in `MainWindow.xaml`). Mostra la pagina
+centrale frontale e le altre inclinate in prospettiva (`PlaneProjection`), rimpicciolite, sovrapposte e sfumate. Le
+pagine *dopo* quella centrale (sotto) hanno il lato in basso, il più vicino a chi guarda, più lungo, come fogli su un
+tavolo; quelle *prima* si aprono a ventaglio specchiate.
+
+- **Costo indipendente dalla lunghezza del documento**: esistono solo 15 "slot" riutilizzati per le pagine più vicine al
+  centro. La posa di ogni slot è una funzione pura della distanza (frazionaria, animata) dal centro, quindi il movimento
+  è continuo per costruzione. L'animazione è una molla criticamente smorzata avanzata a ogni fotogramma
+  (`CompositionTarget.Rendering`), attiva solo mentre qualcosa si muove.
+- **Hit test proprio**: XAML testerebbe un elemento inclinato contro il suo rettangolo di layout non trasformato, quindi
+  gli slot non sono hit-test visibili e il clic viene tradotto in pagina dagli stessi numeri usati per disegnarli.
+- **Sfogliare non muove il documento**: solo il clic (o Invio) sulla pagina, `PageActivated`. In senso inverso,
+  scorrere il documento aggiorna `MainViewModel.CurrentPageIndex` (calcolato dalla pagina al centro del viewport) e la
+  striscia la segue; durante lo scorrimento animato avviato dalla finestra stessa la lettura è sospesa 800 ms, perché le
+  posizioni intermedie non sono una scelta dell'utente.
+- **Accessibilità**: `CoverFlowStripAutomationPeer` la espone come cursore sui numeri di pagina (valore = pagina
+  centrale, "Invoke" = apri la pagina centrale). Serve anche ai test con UI Automation.
+
+**Generazione delle miniature** (`MainViewModel.BeginThumbnails` / `RunThumbnailLoopAsync`): parte solo quando la vista
+principale è completamente popolata (ogni pagina ha il suo bitmap) e solo per documenti con 3+ pagine; è la stessa
+condizione che rende visibili pulsante, maniglia e striscia. "Thread separato" significa fuori dal thread UI: un task del
+thread pool renderizza una pagina alla volta. Non può significare un secondo thread PDFium, perché la libreria in questa
+build non è thread-safe e ogni chiamata passa comunque dall'unico worker di `PdfiumRuntime`; una pagina per volta tiene
+brevi quelle chiamate, così uno zoom o la modifica di un campo aspettano al massimo una miniatura. L'ordine è "la più
+vicina alla pagina centrale della striscia per prima". Le miniature usano lo stesso rendering della vista (con i campi
+compilati), si rigenerano per la pagina modificata dopo la modifica di un campo, e prima di appiattire e salvare il ciclo
+viene fermato e atteso, perché sta per sparire il `PdfFormFiller` che usa.
+
+**Impostazioni**: `AppSettings.ThumbnailPanelOpen` (chiusa alla prima esecuzione, poi come l'ha lasciata l'utente).
+`MainViewModel` tiene un solo oggetto `AppSettings` e lo salva intero: salvare un valore con un `AppSettings` nuovo
+azzererebbe tutti gli altri.
+
 ## Associazione file .pdf: perché solo HKCU e nessuna forzatura del default
 
 `Services/FileAssociationService.cs` registra PDF26 come app candidata per aprire i `.pdf` **solo su richiesta
