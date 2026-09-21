@@ -17,7 +17,17 @@ public sealed class PrintService
 {
     /// <summary>Shows the native print dialog and, if confirmed, prints the requested pages.</summary>
     /// <param name="ownerHwnd">The main window's HWND (from <c>WinRT.Interop.WindowNative.GetWindowHandle</c>), used to own the print dialog.</param>
-    public bool TryShowPrintDialogAndPrint(IntPtr ownerHwnd, PdfDocument document, string documentTitle)
+    /// <param name="renderPage">
+    /// Renders a 0-based page index at a pixel size to a top-down BGRA buffer. Pass the same
+    /// renderer the on-screen view uses (the app routes it through
+    /// <c>PdfFormFiller.RenderPageToBgra</c> while a form filler is open): a value filled in
+    /// but not yet flattened lives only in PDFium's live form-fill state, and plain
+    /// <see cref="PdfPage.RenderToBgra"/> paints the widgets' last-generated appearance
+    /// stream, so printing through it produced sheets without the user's entries. When
+    /// <see langword="null"/>, falls back to <see cref="PdfPage.RenderToBgra"/>.
+    /// </param>
+    public bool TryShowPrintDialogAndPrint(
+        IntPtr ownerHwnd, PdfDocument document, string documentTitle, Func<int, int, int, byte[]>? renderPage = null)
     {
         ArgumentNullException.ThrowIfNull(document);
 
@@ -55,7 +65,7 @@ public sealed class PrintService
         var pinnedPageBuffers = new List<GCHandle>();
         try
         {
-            printDoc.PrintPage += (_, e) => PrintPage(e, document, ref nextPageIndex, lastPage - 1, pinnedPageBuffers);
+            printDoc.PrintPage += (_, e) => PrintPage(e, document, renderPage, ref nextPageIndex, lastPage - 1, pinnedPageBuffers);
             printDoc.Print();
         }
         finally
@@ -83,7 +93,7 @@ public sealed class PrintService
     /// still valid long enough for whatever *did* run synchronously). Keeping every page's
     /// buffer pinned for the whole job removes that same class of bug here too.
     /// </remarks>
-    private static void PrintPage(PrintPageEventArgs e, PdfDocument document, ref int nextPageIndex, int lastPageIndexInclusive, List<GCHandle> pinnedPageBuffers)
+    private static void PrintPage(PrintPageEventArgs e, PdfDocument document, Func<int, int, int, byte[]>? renderPage, ref int nextPageIndex, int lastPageIndexInclusive, List<GCHandle> pinnedPageBuffers)
     {
         if (e.Graphics is null || e.PageBounds.Width <= 0 || e.PageBounds.Height <= 0)
         {
@@ -96,8 +106,16 @@ public sealed class PrintService
         var pixelWidth = (int)Math.Round(e.PageBounds.Width * dpiX / 100.0);
         var pixelHeight = (int)Math.Round(e.PageBounds.Height * dpiY / 100.0);
 
-        using var page = document.GetPage(nextPageIndex);
-        var bgra = page.RenderToBgra(pixelWidth, pixelHeight);
+        byte[] bgra;
+        if (renderPage is not null)
+        {
+            bgra = renderPage(nextPageIndex, pixelWidth, pixelHeight);
+        }
+        else
+        {
+            using var page = document.GetPage(nextPageIndex);
+            bgra = page.RenderToBgra(pixelWidth, pixelHeight);
+        }
 
         var handle = GCHandle.Alloc(bgra, GCHandleType.Pinned);
         pinnedPageBuffers.Add(handle);

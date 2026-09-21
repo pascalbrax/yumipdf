@@ -101,7 +101,8 @@ public sealed partial class MainWindow : Window
         try
         {
             _printService.TryShowPrintDialogAndPrint(
-                WindowNative.GetWindowHandle(this), ViewModel.Document, ViewModel.DocumentTitle ?? "PDF26");
+                WindowNative.GetWindowHandle(this), ViewModel.Document, ViewModel.DocumentTitle ?? "PDF26",
+                ViewModel.RenderPageForPrint);
         }
         catch (Exception ex)
         {
