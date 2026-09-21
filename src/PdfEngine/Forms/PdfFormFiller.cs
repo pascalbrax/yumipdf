@@ -366,21 +366,22 @@ public sealed class PdfFormFiller : IDisposable
     }
 
     /// <summary>
-    /// Sets a <see cref="PdfFormFieldType.ComboBox"/>'s selected value by <paramref name="optionLabel"/>
-    /// (one of <see cref="GetOptions"/>'s entries).
+    /// Selects the option at <paramref name="optionIndex"/> (an index into <see cref="GetOptions"/>'s
+    /// ordered label list) in a <see cref="PdfFormFieldType.ComboBox"/>.
     /// </summary>
     /// <remarks>
-    /// Confirmed live that the exact same focus/select-all/replace-selection/kill-focus
-    /// sequence <see cref="SetFieldValueAndRender"/> uses for text fields works for combo boxes
-    /// too - a combo box's value is fundamentally text, just constrained by its own drop-down
-    /// UI to the option labels in practice (PDFium enforces nothing here; passing a label not
-    /// in <see cref="GetOptions"/> would just set an off-list value, so callers should only ever
-    /// pass one of those labels back).
+    /// Goes through <c>FORM_SetIndexSelected</c>, not through the text-replacement sequence
+    /// <see cref="SetFieldValueAndRender"/> uses. The text route was tried first and looked fine
+    /// live, but it only ever worked for the *first* selection of an empty combo box: once the
+    /// field already had a value, replacing its text was silently ignored (checked against two
+    /// real forms - "Choice 1" -> "Choice 2" and "New York" -> "London" both left the old value
+    /// in place), so a changed choice never reached the page, the printout or the saved file
+    /// while the side panel happily showed the new one. <c>FORM_SetIndexSelected</c> applies
+    /// every change, repeated ones included.
     /// </remarks>
-    public byte[] SetComboSelectionAndRender(PdfFormField field, string optionLabel, int pixelWidth, int pixelHeight)
+    public byte[] SetComboSelectionAndRender(PdfFormField field, int optionIndex, int pixelWidth, int pixelHeight)
     {
         ArgumentNullException.ThrowIfNull(field);
-        ArgumentNullException.ThrowIfNull(optionLabel);
         ThrowIfDisposed();
 
         if (field.Type != PdfFormFieldType.ComboBox)
@@ -389,8 +390,52 @@ public sealed class PdfFormFiller : IDisposable
                 $"SetComboSelectionAndRender supporta solo ComboBox. Il campo '{field.Name}' è di tipo {field.Type}.");
         }
 
-        return ReplaceTextAndRender(field, optionLabel, pixelWidth, pixelHeight);
+        return SelectIndexAndRender(field, optionIndex, pixelWidth, pixelHeight);
     }
+
+    /// <summary>Shared by <see cref="SetComboSelectionAndRender"/> and <see cref="SetListSelectionAndRender"/>.</summary>
+    private byte[] SelectIndexAndRender(PdfFormField field, int optionIndex, int pixelWidth, int pixelHeight)
+        => RunOnFieldAnnotAndRender(field, pixelWidth, pixelHeight, (page, annot) =>
+        {
+            var count = PdfiumNative.FPDFAnnot_GetOptionCount(_formHandle, annot);
+            if (optionIndex < 0 || optionIndex >= count)
+            {
+                throw new ArgumentOutOfRangeException(nameof(optionIndex));
+            }
+
+            if (!PdfiumNative.FORM_SetFocusedAnnot(_formHandle, annot))
+            {
+                throw new PdfException(PdfErrorCode.Unknown, $"Impossibile impostare il focus sul campo '{field.Name}'.");
+            }
+
+            bool selected;
+            try
+            {
+                // FORM_SetIndexSelected only ever *adds* to a multi-select list box's selection
+                // (caught live: picking French, German, English in turn left all three highlighted
+                // on the page while the single-selection side panel showed one). The caller's model
+                // is "this one option", so clear whatever else is selected first.
+                for (var i = 0; i < count; i++)
+                {
+                    if (i != optionIndex && PdfiumNative.FORM_IsIndexSelected(_formHandle, page, i))
+                    {
+                        PdfiumNative.FORM_SetIndexSelected(_formHandle, page, i, false);
+                    }
+                }
+
+                selected = PdfiumNative.FORM_SetIndexSelected(_formHandle, page, optionIndex, true);
+            }
+            finally
+            {
+                // The explicit commit step every interactive edit needs (see ReplaceTextAndRender).
+                PdfiumNative.FORM_ForceToKillFocus(_formHandle);
+            }
+
+            if (!selected)
+            {
+                throw new PdfException(PdfErrorCode.Unknown, $"Impossibile selezionare la voce {optionIndex} del campo '{field.Name}'.");
+            }
+        });
 
     private byte[] ReplaceTextAndRender(PdfFormField field, string newValue, int pixelWidth, int pixelHeight)
         => RunOnFieldAnnotAndRender(field, pixelWidth, pixelHeight, (page, annot) =>
@@ -410,15 +455,13 @@ public sealed class PdfFormFiller : IDisposable
 
     /// <summary>
     /// Selects the option at <paramref name="optionIndex"/> in a <see cref="PdfFormFieldType.ListBox"/>
-    /// field (indices refer into <see cref="GetOptions"/>'s ordered label list) by simulating a
-    /// click at that row's position within the widget's own rectangle.
+    /// field (indices refer into <see cref="GetOptions"/>'s ordered label list).
     /// </summary>
     /// <remarks>
-    /// Unlike a checkbox/radio click, a list box row selection does not stick on its own:
-    /// confirmed live that <see cref="GetSelectedOptionIndices"/> kept reporting nothing
-    /// selected right after the click, and only reflected it once <c>FORM_ForceToKillFocus</c>
-    /// ran afterwards - the same explicit commit step text fields need, that
-    /// <see cref="ReplaceTextAndRender"/> already calls for exactly this reason.
+    /// Same <c>FORM_SetIndexSelected</c> route as <see cref="SetComboSelectionAndRender"/>. It
+    /// replaced a simulated click at the row's computed position, which assumed every option is
+    /// visible at once with the same height (<c>rowHeight = widgetHeight / optionCount</c>) and so
+    /// picked the wrong row for a long, scrolling list.
     /// </remarks>
     public byte[] SetListSelectionAndRender(PdfFormField field, int optionIndex, int pixelWidth, int pixelHeight)
     {
@@ -431,29 +474,7 @@ public sealed class PdfFormFiller : IDisposable
                 $"SetListSelectionAndRender supporta solo ListBox. Il campo '{field.Name}' è di tipo {field.Type}.");
         }
 
-        return RunOnFieldAnnotAndRender(field, pixelWidth, pixelHeight, (page, annot) =>
-        {
-            var count = PdfiumNative.FPDFAnnot_GetOptionCount(_formHandle, annot);
-            if (optionIndex < 0 || optionIndex >= count)
-            {
-                throw new ArgumentOutOfRangeException(nameof(optionIndex));
-            }
-
-            var rect = new PdfiumNative.FS_RECTF();
-            if (!PdfiumNative.FPDFAnnot_GetRect(annot, ref rect))
-            {
-                throw new PdfException(PdfErrorCode.Unknown, $"Impossibile leggere l'area del campo '{field.Name}'.");
-            }
-
-            var rowHeight = (rect.Top - rect.Bottom) / count;
-            var x = (rect.Left + rect.Right) / 2.0;
-            var y = rect.Top - rowHeight * (optionIndex + 0.5);
-
-            PdfiumNative.FORM_OnMouseMove(_formHandle, page, 0, x, y);
-            PdfiumNative.FORM_OnLButtonDown(_formHandle, page, 0, x, y);
-            PdfiumNative.FORM_OnLButtonUp(_formHandle, page, 0, x, y);
-            PdfiumNative.FORM_ForceToKillFocus(_formHandle);
-        });
+        return SelectIndexAndRender(field, optionIndex, pixelWidth, pixelHeight);
     }
 
     /// <summary>

@@ -111,9 +111,9 @@
                     </ScrollViewer>
 
                     <StackPanel Grid.Row="2" Orientation="Vertical" Spacing="8" Padding="16">
-                        <CheckBox Content="Appiattisci prima di salvare" IsChecked="{x:Bind ViewModel.FlattenBeforeSave, Mode=TwoWay}" />
+                        <CheckBox Content="Unisci prima di salvare" IsChecked="{x:Bind ViewModel.FlattenBeforeSave, Mode=TwoWay}" />
                         <TextBlock TextWrapping="Wrap" FontSize="11" Opacity="0.7"
-                                   Text="Rende definitivi i valori compilati e non sarà più possibile modificarli in questa sessione. Il file originale non viene mai sovrascritto." />
+                                   Text="Unisce i valori compilati al contenuto della pagina: diventano definitivi e non sarà più possibile modificarli in questa sessione. Il file originale non viene mai sovrascritto." />
                         <Button Content="Salva con nome..." HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Click="OnSaveFilledFormClicked" />
                     </StackPanel>
 

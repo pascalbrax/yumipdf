@@ -322,13 +322,20 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     /// <summary>Commits a combo box's newly picked option and re-renders its page.</summary>
     public Task ApplyComboSelectionAsync(FormFieldEntryViewModel entry)
-        => EnqueueFieldEditAsync(entry.Field.PageIndex, entry.Field.Name,
-            (formFiller, w, h) => formFiller.SetComboSelectionAndRender(entry.Field, entry.Options[entry.SelectedOptionIndex], w, h));
+    {
+        // Captured now, not read when the queued edit runs: a quick second pick would otherwise be written twice.
+        var optionIndex = entry.SelectedOptionIndex;
+        return EnqueueFieldEditAsync(entry.Field.PageIndex, entry.Field.Name,
+            (formFiller, w, h) => formFiller.SetComboSelectionAndRender(entry.Field, optionIndex, w, h));
+    }
 
     /// <summary>Commits a list box's newly picked option and re-renders its page.</summary>
     public Task ApplyListSelectionAsync(FormFieldEntryViewModel entry)
-        => EnqueueFieldEditAsync(entry.Field.PageIndex, entry.Field.Name,
-            (formFiller, w, h) => formFiller.SetListSelectionAndRender(entry.Field, entry.SelectedOptionIndex, w, h));
+    {
+        var optionIndex = entry.SelectedOptionIndex;
+        return EnqueueFieldEditAsync(entry.Field.PageIndex, entry.Field.Name,
+            (formFiller, w, h) => formFiller.SetListSelectionAndRender(entry.Field, optionIndex, w, h));
+    }
 
     /// <summary>
     /// Clicks a push button and re-renders its page - then, since the button's action (a
@@ -481,7 +488,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
             if (flatten)
             {
-                InfoMessage = "Documento appiattito e salvato: i campi non sono più modificabili in questa sessione.";
+                InfoMessage = "Documento unito e salvato: i valori compilati sono ora parte della pagina e i campi non sono più modificabili in questa sessione.";
             }
 
             return true;

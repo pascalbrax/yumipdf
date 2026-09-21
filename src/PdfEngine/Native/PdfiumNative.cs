@@ -324,6 +324,18 @@ internal static class PdfiumNative
     [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
     public static extern bool FORM_ForceToKillFocus(IntPtr formHandle);
 
+    // Selects an item of the *focused* combo box/list box (FORM_SetFocusedAnnot first). Exported by
+    // pdfium.dll although easy to miss in the headers: for combo boxes it is the only route that
+    // keeps working once the field already has a value - replacing its text (FORM_ReplaceSelection)
+    // is silently ignored then. See PdfFormFiller.SetComboSelectionAndRender.
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern bool FORM_SetIndexSelected(IntPtr formHandle, IntPtr page, int index, bool selected);
+
+    // Live state of the focused combo box/list box - unlike FPDFAnnot_IsOptionSelected, which only
+    // reflects a change once the focus has been released.
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern bool FORM_IsIndexSelected(IntPtr formHandle, IntPtr page, int index);
+
     // FPDF_RenderPageBitmap only paints each widget's last-*generated* appearance stream; it
     // does not know a value was just changed interactively and does not regenerate it.
     // FPDF_FFLDraw overlays the live form-fill state on top - call it right after
