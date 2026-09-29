@@ -30,6 +30,13 @@
             <AppBarToggleButton Icon="Edit" Label="Compila modulo" IsChecked="{x:Bind ViewModel.IsFormPanelOpen, Mode=TwoWay}"
                                  Visibility="{x:Bind ViewModel.FormButtonVisibility, Mode=OneWay}" />
             <AppBarSeparator />
+            <!-- Ctrl+F works from anywhere in the window - a KeyboardAccelerator bubbles up regardless of which control currently has focus. -->
+            <AppBarToggleButton x:Name="SearchToggle" Icon="Find" Label="Cerca" IsChecked="{x:Bind ViewModel.IsSearchOpen, Mode=TwoWay}">
+                <AppBarToggleButton.KeyboardAccelerators>
+                    <KeyboardAccelerator Key="F" Modifiers="Control" />
+                </AppBarToggleButton.KeyboardAccelerators>
+            </AppBarToggleButton>
+            <AppBarSeparator />
             <AppBarButton Icon="Setting" Label="Opzioni..." Click="OnSettingsClicked" />
         </CommandBar>
 
@@ -276,6 +283,30 @@
                             ToolTipService.ToolTip="Miniature">
                         <FontIcon x:Name="ThumbnailHandleGlyph" Glyph="&#xE76C;" FontSize="10" />
                     </Button>
+
+                    <!--
+                        Find bar: overlays the top of the page area (browser-style), never
+                        pushed into the layout as its own row so opening/closing it does not
+                        reflow anything else. Search runs page-by-page against text PdfEngine
+                        already extracted natively, or - for a scanned page with none - an OCR
+                        pass that only starts once the whole document has finished its first
+                        render (MainViewModel.BeginTextIndexing/RunOcrLoopAsync).
+                    -->
+                    <Border x:Name="SearchBar" HorizontalAlignment="Stretch" VerticalAlignment="Top"
+                            Background="{ThemeResource LayerFillColorDefaultBrush}"
+                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="0,0,0,1"
+                            Padding="12,8" Visibility="{x:Bind ViewModel.IsSearchOpen, Mode=OneWay}">
+                        <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                            <TextBox x:Name="SearchBox" Width="280" PlaceholderText="Cerca nel testo del documento..."
+                                     Text="{x:Bind ViewModel.SearchQuery, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                     KeyDown="OnSearchBoxKeyDown" />
+                            <TextBlock Text="{x:Bind ViewModel.SearchStatusText, Mode=OneWay}" VerticalAlignment="Center"
+                                       MinWidth="140" Opacity="0.75" TextWrapping="Wrap" />
+                            <Button Content="&#x2039;" MinWidth="32" Command="{x:Bind ViewModel.FindPreviousCommand}" ToolTipService.ToolTip="Risultato precedente" />
+                            <Button Content="&#x203A;" MinWidth="32" Command="{x:Bind ViewModel.FindNextCommand}" ToolTipService.ToolTip="Risultato successivo" />
+                            <Button Content="&#x2715;" MinWidth="32" Click="OnCloseSearchClicked" ToolTipService.ToolTip="Chiudi la ricerca" />
+                        </StackPanel>
+                    </Border>
 
                 </Grid>
             </SplitView.Content>

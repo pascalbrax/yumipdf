@@ -15,7 +15,10 @@
 - [x] Rendering progressivo: placeholder dimensionati per tutte le pagine subito (scrollbar/altezza corrette da subito), bitmap popolati in background senza bloccare la UI (`RenderAllPagesAsync`)
 - [x] Gestione documenti protetti da password: dialogo password con retry su password errata (`PasswordPromptDialog`, `MainViewModel.OpenOutcome`)
 - [x] Associazione file `.pdf` **opzionale**, attivabile/disattivabile dal menu Opzioni (non in fase di installazione - scelta esplicita dell'utente): registrazione in `HKCU` (nessun privilegio elevato richiesto), nessuna forzatura del default di Windows (non possibile/non desiderabile forgiare `UserChoice`), link diretto alle impostazioni predefinite di Windows per completare la scelta (`FileAssociationService`)
-- [ ] Ricerca testo (`FPDFText_*`) - rimandato: richiede una nuova superficie di binding nativi (`FPDFText_LoadPage`, `FindStart/FindNext`, `GetCharIndex`, ecc.) più UI di evidenziazione risultati
+- [x] Ricerca testo per parola chiave, a livello di pagina (non di singola occorrenza):
+  `FPDFText_LoadPage/CountChars/GetText` più, per le pagine senza testo (scansioni), un
+  passaggio OCR in background - vedi docs/ARCHITECTURE.md "OCR" per l'architettura e i limiti
+  noti (nessuna evidenziazione della parola, formattazione numerica svizzera debole in OCR)
 - [x] Navigazione da miniature: zona a scomparsa a sinistra con un "Cover Flow" verticale (`CoverFlowStrip`), animato e interattivo (clic, trascinamento, rotella, tastiera). Solo per documenti con 3+ pagine; miniature generate in background dopo il caricamento completo (vedi docs/ARCHITECTURE.md "Miniature"). Verificato con UI Automation e screenshot; il clic reale del mouse sulle miniature non è stato provato (lo script di input simulato è stato bloccato dall'antivirus)
 - [ ] Navigazione dall'indice (bookmark, `FPDFBookmark_*`) - rimandato: binding nativi aggiuntivi + pannello laterale
 - [ ] Virtualizzazione reale del viewport (oggi ogni pagina viene comunque renderizzata e tenuta in memoria, solo in modo progressivo/asincrono - per documenti molto grandi serebbe da scaricare/saltare le pagine lontane dallo scroll corrente)

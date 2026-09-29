@@ -375,4 +375,26 @@ internal static class PdfiumNative
 
     [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
     public static extern int FPDFPage_Flatten(IntPtr page, int nFlag);
+
+    // ---- fpdf_text.h : read-only text extraction from a page's own content stream --------
+    // Reports only text the page already has (a born-digital PDF, or one an OCR pass already
+    // wrote into) - a scanned page with no text layer reports 0 chars here. See
+    // PdfPage.HasExtractableText/ExtractText, the only callers.
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern IntPtr FPDFText_LoadPage(IntPtr page);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern void FPDFText_ClosePage(IntPtr textPage);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern int FPDFText_CountChars(IntPtr textPage);
+
+    // byte[] buffer, not char[]/string: FPDFText_GetText writes raw UTF-16LE code units, and
+    // marshaling that as char[] with the default (Ansi) DllImport charset silently mangles it
+    // (confirmed live: every letter came back with a spurious space after it) - decode with
+    // Encoding.Unicode instead, same fix already needed once in the OCR sandwich spike this
+    // binding grew out of.
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern int FPDFText_GetText(IntPtr textPage, int startIndex, int count, [Out] byte[] buffer);
 }

@@ -119,6 +119,60 @@ public sealed class PdfPage : IDisposable
             };
         });
 
+    /// <summary>
+    /// Whether this page's content stream already has any extractable text - <see langword="true"/>
+    /// for a born-digital page (or one an OCR pass already wrote an invisible text layer into),
+    /// <see langword="false"/> for a purely scanned/image page. Cheap: no bitmap involved.
+    /// </summary>
+    public bool HasExtractableText()
+        => PdfiumRuntime.Invoke(() =>
+        {
+            ThrowIfDisposed();
+            var textPage = PdfiumNative.FPDFText_LoadPage(_handle);
+            if (textPage == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            try
+            {
+                return PdfiumNative.FPDFText_CountChars(textPage) > 0;
+            }
+            finally
+            {
+                PdfiumNative.FPDFText_ClosePage(textPage);
+            }
+        });
+
+    /// <summary>All of this page's text, in reading order, exactly as its content stream stores it - empty for a page with none (see <see cref="HasExtractableText"/>).</summary>
+    public string ExtractText()
+        => PdfiumRuntime.Invoke(() =>
+        {
+            ThrowIfDisposed();
+            var textPage = PdfiumNative.FPDFText_LoadPage(_handle);
+            if (textPage == IntPtr.Zero)
+            {
+                return string.Empty;
+            }
+
+            try
+            {
+                var count = PdfiumNative.FPDFText_CountChars(textPage);
+                if (count <= 0)
+                {
+                    return string.Empty;
+                }
+
+                var buffer = new byte[(count + 1) * 2];
+                var written = PdfiumNative.FPDFText_GetText(textPage, 0, count, buffer);
+                return System.Text.Encoding.Unicode.GetString(buffer, 0, Math.Max(0, written - 1) * 2);
+            }
+            finally
+            {
+                PdfiumNative.FPDFText_ClosePage(textPage);
+            }
+        });
+
     internal IntPtr Handle
     {
         get

@@ -93,7 +93,42 @@ public sealed partial class MainWindow : Window
         {
             UpdateThumbnailHandleGlyph();
         }
+        else if (e.PropertyName == nameof(MainViewModel.IsSearchOpen) && ViewModel.IsSearchOpen)
+        {
+            // Ctrl+F (or the toolbar toggle) should let the user start typing immediately,
+            // not just show an empty bar they then have to click into.
+            SearchBox.Focus(FocusState.Programmatic);
+            SearchBox.SelectAll();
+        }
     }
+
+    private void OnSearchBoxKeyDown(object sender, Microsoft.UI.Xaml.Input.KeyRoutedEventArgs e)
+    {
+        switch (e.Key)
+        {
+            case Windows.System.VirtualKey.Enter:
+                // Shift+Enter searches backwards, matching the usual browser Find convention.
+                if (ViewModel.FindPreviousCommand.CanExecute(null)
+                    && (Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(Windows.System.VirtualKey.Shift) & Windows.UI.Core.CoreVirtualKeyStates.Down) != 0)
+                {
+                    ViewModel.FindPreviousCommand.Execute(null);
+                }
+                else if (ViewModel.FindNextCommand.CanExecute(null))
+                {
+                    ViewModel.FindNextCommand.Execute(null);
+                }
+
+                e.Handled = true;
+                break;
+
+            case Windows.System.VirtualKey.Escape:
+                ViewModel.IsSearchOpen = false;
+                e.Handled = true;
+                break;
+        }
+    }
+
+    private void OnCloseSearchClicked(object sender, RoutedEventArgs e) => ViewModel.IsSearchOpen = false;
 
     private void ScrollToPage(int index)
     {

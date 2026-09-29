@@ -42,6 +42,18 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private Task _renderTask = Task.CompletedTask;
     private double _maxZoomForDocument = MaxZoom;
 
+    // ---- Text search / OCR state (see the "Text search / OCR" region near the bottom) ----
+    private readonly Dictionary<int, string> _pageText = new();
+    private readonly HashSet<int> _ocrPending = new();
+    private CancellationTokenSource? _textIndexCts;
+    private Task _textIndexTask = Task.CompletedTask;
+    private Task _ocrLoop = Task.CompletedTask;
+    private bool _ocrLoopActive;
+    private OcrService? _ocrService;
+    private bool _ocrServiceAttempted;
+    private List<int> _searchMatchPages = new();
+    private int _searchMatchPosition = -1;
+
     public ObservableCollection<PdfPageViewModel> Pages { get; } = new();
 
     public ObservableCollection<FormFieldEntryViewModel> FormFields { get; } = new();
@@ -201,6 +213,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
             await StopThumbnailsAsync().ConfigureAwait(true);
             Thumbnails = null;
 
+            await StopTextIndexingAsync().ConfigureAwait(true);
+            _pageText.Clear();
+            _ocrPending.Clear();
+            _searchMatchPages.Clear();
+            _searchMatchPosition = -1;
+            SearchStatusText = null;
+            NotifyFindCommands();
+
             _formFiller?.Dispose();
             _formFiller = null;
             FormFields.Clear();
@@ -220,8 +240,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
             await RenderAllPagesAsync(cancellationToken, isNewDocument: true);
 
-            // Thumbnails only start once the main view is completely populated - see BeginThumbnails.
+            // Thumbnails/text indexing only start once the main view is completely populated -
+            // see BeginThumbnails/BeginTextIndexing.
             BeginThumbnails(document);
+            BeginTextIndexing(document);
             StatusMessage = null;
             return OpenOutcome.Success;
         }
@@ -518,6 +540,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (flatten)
         {
             await StopThumbnailsAsync().ConfigureAwait(true);
+            await StopTextIndexingAsync().ConfigureAwait(true);
             _formFiller?.Dispose();
             _formFiller = null;
             FormFields.Clear();
@@ -556,10 +579,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
         finally
         {
             // Flattening bakes the field values into the pages: they look the same, but they are
-            // no longer drawn through the (now gone) form filler, so refresh every thumbnail.
+            // no longer drawn through the (now gone) form filler, so refresh every thumbnail -
+            // and re-index text, since baking a filled text field's value in can turn a page
+            // that had no extractable text into one that now does.
             if (flatten)
             {
                 RestartThumbnails();
+                BeginTextIndexing(document);
             }
         }
     }
@@ -1019,10 +1045,306 @@ public partial class MainViewModel : ObservableObject, IDisposable
         NextPageCommand.NotifyCanExecuteChanged();
     }
 
+    // ---- Text search / OCR ---------------------------------------------------------------
+
+    /// <summary>Fixed OCR raster width (proportional height) - not tuned against real documents beyond the exploratory testing in docs/ARCHITECTURE.md "OCR".</summary>
+    private const int OcrPixelWidth = 1000;
+
+    [ObservableProperty]
+    public partial bool IsSearchOpen { get; set; }
+
+    [ObservableProperty]
+    public partial string SearchQuery { get; set; } = string.Empty;
+
+    /// <summary>Null while the search bar has nothing to say (query empty) - e.g. "pagina 2 di 5" or "nessun risultato", plus an OCR-in-progress note while it applies.</summary>
+    [ObservableProperty]
+    public partial string? SearchStatusText { get; set; }
+
+    partial void OnSearchQueryChanged(string value) => RefreshSearchMatches(resetPosition: true);
+
+    partial void OnIsSearchOpenChanged(bool value)
+    {
+        if (!value)
+        {
+            // The bar is hidden; drop the "you are here" pointer - by the time it is reopened
+            // the user could have scrolled anywhere, so resuming Find should start fresh from
+            // wherever they are now rather than from a stale position.
+            _searchMatchPosition = -1;
+        }
+    }
+
+    [RelayCommand(CanExecute = nameof(CanFind))]
+    private void FindNext() => MoveToMatch(+1);
+
+    [RelayCommand(CanExecute = nameof(CanFind))]
+    private void FindPrevious() => MoveToMatch(-1);
+
+    private bool CanFind() => _document is not null && !string.IsNullOrWhiteSpace(SearchQuery);
+
+    private void MoveToMatch(int direction)
+    {
+        if (_searchMatchPages.Count == 0)
+        {
+            return;
+        }
+
+        if (_searchMatchPosition < 0)
+        {
+            // First Enter/Next on a fresh query: jump to the nearest match at or after the
+            // page already on screen, not always back to the very first match in the document.
+            var fromCurrent = _searchMatchPages.FindIndex(p => p >= CurrentPageIndex);
+            _searchMatchPosition = fromCurrent >= 0 ? fromCurrent : 0;
+        }
+        else
+        {
+            _searchMatchPosition = ((_searchMatchPosition + direction) % _searchMatchPages.Count + _searchMatchPages.Count) % _searchMatchPages.Count;
+        }
+
+        CurrentPageIndex = _searchMatchPages[_searchMatchPosition];
+        UpdateSearchStatusText();
+    }
+
+    /// <summary>
+    /// Recomputes which pages match <see cref="SearchQuery"/> (case-insensitive substring,
+    /// page granularity - not per-occurrence: see docs/ARCHITECTURE.md "OCR" for why a
+    /// precise per-word position was dropped) against whatever text is indexed so far.
+    /// Called both when the query changes and every time one more page's OCR result comes
+    /// in, since that can only ever add matches, never remove the ones already found.
+    /// </summary>
+    private void RefreshSearchMatches(bool resetPosition)
+    {
+        var query = SearchQuery;
+        var previousPage = !resetPosition && _searchMatchPosition >= 0 && _searchMatchPosition < _searchMatchPages.Count
+            ? _searchMatchPages[_searchMatchPosition]
+            : (int?)null;
+
+        _searchMatchPages = string.IsNullOrWhiteSpace(query)
+            ? new List<int>()
+            : _pageText
+                .Where(kv => kv.Value.Contains(query, StringComparison.OrdinalIgnoreCase))
+                .Select(kv => kv.Key)
+                .OrderBy(index => index)
+                .ToList();
+
+        _searchMatchPosition = previousPage is { } page ? _searchMatchPages.IndexOf(page) : -1;
+
+        UpdateSearchStatusText();
+        NotifyFindCommands();
+    }
+
+    private void UpdateSearchStatusText()
+    {
+        if (string.IsNullOrWhiteSpace(SearchQuery))
+        {
+            SearchStatusText = null;
+            return;
+        }
+
+        var countText = _searchMatchPages.Count == 0
+            ? "Nessun risultato"
+            : _searchMatchPosition >= 0
+                ? $"Pagina {_searchMatchPages[_searchMatchPosition] + 1} - risultato {_searchMatchPosition + 1} di {_searchMatchPages.Count}"
+                : $"{_searchMatchPages.Count} pagine con risultati";
+
+        SearchStatusText = _ocrPending.Count > 0
+            ? $"{countText} (riconoscimento testo in corso: {_ocrPending.Count} pagine rimanenti)"
+            : countText;
+    }
+
+    private void NotifyFindCommands()
+    {
+        FindNextCommand.NotifyCanExecuteChanged();
+        FindPreviousCommand.NotifyCanExecuteChanged();
+    }
+
+    /// <summary>
+    /// Builds the page-to-text index search runs against: fast native extraction
+    /// (<see cref="PdfPage.HasExtractableText"/>) for every page first, then queues an OCR
+    /// pass for whichever pages had none. Deliberately only starts once the whole document is
+    /// already on screen (called from the same place as <see cref="BeginThumbnails"/>, right
+    /// after <see cref="RenderAllPagesAsync"/> completes), so neither pass ever competes with
+    /// the document's first real render for the single PDFium thread.
+    /// </summary>
+    private void BeginTextIndexing(PdfDocument document)
+    {
+        if (!ReferenceEquals(document, _document) || Pages.Count != document.PageCount)
+        {
+            return;
+        }
+
+        _textIndexCts?.Cancel();
+        var cts = new CancellationTokenSource();
+        _textIndexCts = cts;
+        _textIndexTask = RunNativeTextPassAsync(document, cts.Token);
+    }
+
+    private async Task RunNativeTextPassAsync(PdfDocument document, CancellationToken token)
+    {
+        for (var index = 0; index < document.PageCount; index++)
+        {
+            if (token.IsCancellationRequested)
+            {
+                return;
+            }
+
+            var pageIndex = index;
+            var (hasText, text) = await Task.Run(() =>
+            {
+                using var page = document.GetPage(pageIndex);
+                return page.HasExtractableText() ? (true, page.ExtractText()) : (false, string.Empty);
+            }, token).ConfigureAwait(true);
+
+            if (token.IsCancellationRequested)
+            {
+                return;
+            }
+
+            if (hasText)
+            {
+                _pageText[pageIndex] = text;
+            }
+            else
+            {
+                _ocrPending.Add(pageIndex);
+            }
+        }
+
+        RefreshSearchMatches(resetPosition: false);
+        EnsureOcrLoop();
+    }
+
+    /// <summary>Cancels indexing/OCR and waits for the in-flight page (at most one, either pass) to finish, so the document/filler can then be safely replaced or disposed.</summary>
+    private async Task StopTextIndexingAsync()
+    {
+        _textIndexCts?.Cancel();
+        try
+        {
+            await _textIndexTask.ConfigureAwait(true);
+        }
+        catch
+        {
+            // Either pass swallows its own errors; nothing to report from a cancelled one.
+        }
+
+        try
+        {
+            await _ocrLoop.ConfigureAwait(true);
+        }
+        catch
+        {
+        }
+
+        _ocrPending.Clear();
+    }
+
+    private void EnsureOcrLoop()
+    {
+        if (_ocrLoopActive
+            || _ocrPending.Count == 0
+            || _document is not { } document
+            || _textIndexCts is not { IsCancellationRequested: false } cts)
+        {
+            return;
+        }
+
+        if (!_ocrServiceAttempted)
+        {
+            _ocrServiceAttempted = true;
+            _ocrService = OcrService.TryCreate();
+            if (_ocrService is null)
+            {
+                // No OCR-capable language installed in Windows: the pages queued above simply
+                // stay unsearchable (native-text pages still work). Said once per document,
+                // not once per page.
+                InfoMessage = "Riconoscimento del testo non disponibile: nessuna lingua per l'OCR è installata in Windows. Le pagine scansionate non sono ricercabili.";
+            }
+        }
+
+        if (_ocrService is null)
+        {
+            _ocrPending.Clear();
+            return;
+        }
+
+        _ocrLoopActive = true;
+        _ocrLoop = RunOcrLoopAsync(document, _ocrService, cts.Token);
+    }
+
+    /// <remarks>
+    /// Same "one page per background task" discipline as <see cref="RunThumbnailLoopAsync"/>,
+    /// for the same reason: the render this needs to get a bitmap for the OCR engine still
+    /// funnels through <c>PdfiumRuntime</c>'s single worker, so a short per-page unit of work
+    /// keeps a zoom change or a field edit from waiting behind the whole document's OCR pass.
+    /// Pages are taken in order rather than nearest-to-current (contrast
+    /// <see cref="TakeNextPendingThumbnail"/>) - search has no single "page the user is about
+    /// to see" to prioritize toward.
+    /// </remarks>
+    private async Task RunOcrLoopAsync(PdfDocument document, OcrService ocr, CancellationToken token)
+    {
+        try
+        {
+            while (!token.IsCancellationRequested && TakeNextPendingOcrPage() is { } index)
+            {
+                try
+                {
+                    var formFiller = _formFiller;
+                    int height;
+                    using (var page = document.GetPage(index))
+                    {
+                        var (widthPt, heightPt) = page.SizeInPoints;
+                        height = widthPt > 0 ? Math.Max(1, (int)Math.Round(OcrPixelWidth * heightPt / widthPt)) : OcrPixelWidth;
+                    }
+
+                    var bgra = await Task.Run(() => RenderPageBgra(document, formFiller, index, OcrPixelWidth, height), token)
+                        .ConfigureAwait(true);
+                    if (token.IsCancellationRequested)
+                    {
+                        break;
+                    }
+
+                    var text = await ocr.RecognizeAsync(bgra, OcrPixelWidth, height).ConfigureAwait(true);
+                    if (token.IsCancellationRequested)
+                    {
+                        break;
+                    }
+
+                    _pageText[index] = text;
+                    RefreshSearchMatches(resetPosition: false);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+                catch (Exception)
+                {
+                    // A page that fails OCR simply stays unsearchable; the rest of the document carries on.
+                }
+            }
+        }
+        finally
+        {
+            _ocrLoopActive = false;
+            UpdateSearchStatusText();
+        }
+    }
+
+    private int? TakeNextPendingOcrPage()
+    {
+        if (_ocrPending.Count == 0)
+        {
+            return null;
+        }
+
+        var next = _ocrPending.Min();
+        _ocrPending.Remove(next);
+        return next;
+    }
+
     public void Dispose()
     {
         _renderCts?.Cancel();
         _thumbnailCts?.Cancel();
+        _textIndexCts?.Cancel();
         _formFiller?.Dispose();
         _formFiller = null;
         _document?.Dispose();

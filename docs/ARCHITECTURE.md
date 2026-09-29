@@ -229,6 +229,54 @@ viene fermato e atteso, perché sta per sparire il `PdfFormFiller` che usa.
 `MainViewModel` tiene un solo oggetto `AppSettings` e lo salva intero: salvare un valore con un `AppSettings` nuovo
 azzererebbe tutti gli altri.
 
+## Ricerca testo e OCR
+
+La ricerca (barra a scomparsa in cima all'area pagine, `Icon="Find"`, Ctrl+F) è **per pagina, non per
+occorrenza**: trova quali pagine contengono la parola cercata (confronto senza distinzione di
+maiuscole/minuscole, `string.Contains(..., OrdinalIgnoreCase)`) e ci salta, senza evidenziare la parola
+sulla pagina né contare le occorrenze al suo interno. Scelta deliberata, non un taglio per fretta: la
+richiesta esplicita era "la priorità è la ricerca di parole chiave testuali", e la sessione di verifica
+precedente aveva trovato un bug reale, mai isolato, nel posizionare per-parola un livello di testo
+(si vedano i commit precedenti a questo per la cronaca completa) - niente di quel meccanismo entra qui.
+
+**Dove il testo di ogni pagina viene letto** (`PdfPage.HasExtractableText`/`ExtractText`, in `PdfEngine`,
+nessuna dipendenza da un form-fill environment): `FPDFText_LoadPage` + `FPDFText_CountChars` per sapere se
+la pagina ha già del testo proprio (un PDF nato digitale, o uno scansionato la cui pagina scannerizzata
+porti già un livello di testo), `FPDFText_GetText` per estrarlo. Una pagina scansionata pura risponde 0
+caratteri.
+
+**Indicizzazione** (`MainViewModel`, regione "Text search / OCR"): dopo l'apertura di un documento, un primo
+passaggio veloce legge il testo nativo di ogni pagina (una alla volta, tramite `PdfiumRuntime`, come tutto
+il resto). Le pagine senza testo proprio finiscono in coda per l'OCR. Il passaggio OCR **parte solo a
+render principale completato** (stessa chiamata di `BeginThumbnails`), una pagina alla volta, in ordine,
+per non competere con il rendering per l'unico thread PDFium.
+
+**OCR**: `Services/OcrService.cs`, sopra `Windows.Media.Ocr` - l'API di sistema di Windows, non una
+libreria open source (le alternative open source - RapidOCR/Tesseract - sono state confrontate prima di
+scegliere questa; vedi la discussione in sessione). Non richiede alcun pacchetto oltre al SDK di Windows
+già usato dal progetto (`net10.0-windows10.0.19041.0`): confermato con una prova che referenzia solo
+`PdfEngine`, senza Windows App SDK. Limite reale, non teorico: dipende da un componente per lingua
+installato in Windows (Impostazioni > Ora e lingua > Lingua e area geografica) - una lingua non installata
+restituisce un motore nullo, non un motore lento. Se nessuna lingua OCR è disponibile, `EnsureOcrLoop`
+lo segnala una sola volta (`InfoMessage`) e le pagine in coda restano semplicemente non ricercabili; le
+pagine con testo nativo continuano a funzionare. Restituisce `OcrResult.Text`, il testo di pagina già unito
+da Windows - non le posizioni delle singole parole (vedi sopra).
+
+**Aggiornamento del risultato**: ogni pagina OCR completata richiama `RefreshSearchMatches`, quindi i
+risultati di una ricerca già aperta crescono via via che l'OCR avanza; il testo di stato lo dice
+("riconoscimento testo in corso: N pagine rimanenti"). L'appiattimento di un modulo (unisci) può far
+comparire testo vero su una pagina che prima non ne aveva (un campo testo compilato viene disegnato nel
+contenuto della pagina) - `SaveFilledFormAsync` rilancia l'indicizzazione dopo aver appiattito, per lo
+stesso motivo per cui già rilancia le miniature.
+
+**Verificato dal vivo** (UI Automation): parola presente solo nel testo nativo di una pagina trovata
+subito; parola presente solo nell'immagine scansionata di un'altra pagina trovata dopo l'OCR, con
+navigazione "Successivo" che salta esattamente alla pagina giusta; nessun risultato mostra "Nessun
+risultato"; il pulsante di chiusura nasconde la barra. Non verificato dal vivo: la scorciatoia Ctrl+F in
+sé (il tentativo di invio tasti simulato è stato interrotto dal controllo di sicurezza "la finestra in
+primo piano non è PDF26" prima di inviare nulla) - il meccanismo (`KeyboardAccelerator` dichiarativo su
+`SearchToggle`) è lo stesso schema standard già usato altrove in WinUI3, non testato live in questa sessione.
+
 ## Associazione file .pdf: perché solo HKCU e nessuna forzatura del default
 
 `Services/FileAssociationService.cs` registra PDF26 come app candidata per aprire i `.pdf` **solo su richiesta
