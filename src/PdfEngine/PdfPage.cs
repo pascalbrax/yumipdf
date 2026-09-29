@@ -173,6 +173,72 @@ public sealed class PdfPage : IDisposable
             }
         });
 
+    /// <summary>
+    /// Every rectangle (PDF point space, left/bottom/right/top) covering an occurrence of
+    /// <paramref name="query"/> in this page's own text - case-insensitive, whole document's
+    /// worth of a single search pass per call. A match spanning a line wrap comes back as more
+    /// than one rectangle for that one occurrence (PDFium's own <c>FPDFText_CountRects</c>
+    /// already merges same-line/same-font runs, so this does not need to). Empty for a page
+    /// with no extractable text (<see cref="HasExtractableText"/>) - a scanned page's matches
+    /// come from OCR word positions instead, kept and searched separately (App project).
+    /// </summary>
+    public IReadOnlyList<(double Left, double Bottom, double Right, double Top)> FindTextRects(string query)
+        => PdfiumRuntime.Invoke(() =>
+        {
+            ThrowIfDisposed();
+            var results = new List<(double Left, double Bottom, double Right, double Top)>();
+            if (string.IsNullOrEmpty(query))
+            {
+                return results;
+            }
+
+            var textPage = PdfiumNative.FPDFText_LoadPage(_handle);
+            if (textPage == IntPtr.Zero)
+            {
+                return results;
+            }
+
+            var needle = System.Runtime.InteropServices.Marshal.StringToHGlobalUni(query);
+            var searchHandle = IntPtr.Zero;
+            try
+            {
+                // No FPDF_MATCHCASE/MATCHWHOLEWORD: search is a case-insensitive substring
+                // match everywhere else in the app (MainViewModel's native-text/OCR-text
+                // check), and PDFium's own default without those flags is exactly that.
+                searchHandle = PdfiumNative.FPDFText_FindStart(textPage, needle, 0, 0);
+                if (searchHandle == IntPtr.Zero)
+                {
+                    return results;
+                }
+
+                while (PdfiumNative.FPDFText_FindNext(searchHandle))
+                {
+                    var startIndex = PdfiumNative.FPDFText_GetSchResultIndex(searchHandle);
+                    var count = PdfiumNative.FPDFText_GetSchCount(searchHandle);
+                    var rectCount = PdfiumNative.FPDFText_CountRects(textPage, startIndex, count);
+                    for (var i = 0; i < rectCount; i++)
+                    {
+                        if (PdfiumNative.FPDFText_GetRect(textPage, i, out var left, out var top, out var right, out var bottom))
+                        {
+                            results.Add((left, bottom, right, top));
+                        }
+                    }
+                }
+            }
+            finally
+            {
+                if (searchHandle != IntPtr.Zero)
+                {
+                    PdfiumNative.FPDFText_FindClose(searchHandle);
+                }
+
+                System.Runtime.InteropServices.Marshal.FreeHGlobal(needle);
+                PdfiumNative.FPDFText_ClosePage(textPage);
+            }
+
+            return results;
+        });
+
     internal IntPtr Handle
     {
         get

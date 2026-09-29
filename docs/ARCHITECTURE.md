@@ -231,10 +231,18 @@ azzererebbe tutti gli altri.
 
 ## Ricerca testo e OCR
 
-La ricerca (barra a scomparsa in cima all'area pagine, `Icon="Find"`, Ctrl+F) è **per pagina, non per
+La ricerca (barra a scomparsa in cima all'area pagine, `Icon="Find"`, Ctrl+F - all'apertura il focus
+tastiera va nella casella, con un rinvio di un ciclo del dispatcher perché la barra deve prima passare
+da `Collapsed` a `Visible` ed essere disposta prima che `Focus()` funzioni) è **per pagina, non per
 occorrenza**: trova quali pagine contengono la parola cercata (confronto senza distinzione di
-maiuscole/minuscole, `string.Contains(..., OrdinalIgnoreCase)`) e ci salta, senza evidenziare la parola
-sulla pagina né contare le occorrenze al suo interno. Scelta deliberata, non un taglio per fretta: la
+maiuscole/minuscole, `string.Contains(..., OrdinalIgnoreCase)`) e ci salta. Ogni occorrenza sulla pagina
+attiva viene evidenziata (rettangolo semitrasparente, `PdfPageViewModel.Highlights`) - un overlay
+esclusivamente a schermo, mai scritto nel PDF: per il testo nativo usa l'API di ricerca di PDFium
+(`FPDFText_FindStart/FindNext` + `FPDFText_CountRects/GetRect`, in sola lettura, indipendente dalle API di
+scrittura del "sandwich" più sotto), per una pagina OCR confronta il testo di ogni singola parola
+riconosciuta con la query - un limite reale: una query di più parole divisa tra due parole OCR non
+verrebbe evidenziata (la pagina risulta comunque trovata, tramite il testo unito). Niente conta le
+occorrenze all'interno della pagina. Scelta deliberata, non un taglio per fretta: la
 richiesta esplicita era "la priorità è la ricerca di parole chiave testuali", e la sessione di verifica
 precedente aveva trovato un bug reale, mai isolato, nel posizionare per-parola un livello di testo
 (si vedano i commit precedenti a questo per la cronaca completa) - niente di quel meccanismo entra qui.
@@ -259,8 +267,10 @@ già usato dal progetto (`net10.0-windows10.0.19041.0`): confermato con una prov
 installato in Windows (Impostazioni > Ora e lingua > Lingua e area geografica) - una lingua non installata
 restituisce un motore nullo, non un motore lento. Se nessuna lingua OCR è disponibile, `EnsureOcrLoop`
 lo segnala una sola volta (`InfoMessage`) e le pagine in coda restano semplicemente non ricercabili; le
-pagine con testo nativo continuano a funzionare. Restituisce `OcrResult.Text`, il testo di pagina già unito
-da Windows - non le posizioni delle singole parole (vedi sopra).
+pagine con testo nativo continuano a funzionare. `RecognizeAsync` restituisce sia `OcrResult.Text` (il
+testo di pagina già unito da Windows, usato per trovare la pagina) sia l'elenco delle singole parole
+riconosciute con il loro rettangolo in pixel (usato solo per l'evidenziazione a schermo, mai scritto nel
+PDF - la stessa distinzione già fatta sopra per il "sandwich" abbandonato).
 
 **Aggiornamento del risultato**: ogni pagina OCR completata richiama `RefreshSearchMatches`, quindi i
 risultati di una ricerca già aperta crescono via via che l'OCR avanza; il testo di stato lo dice
@@ -269,13 +279,17 @@ comparire testo vero su una pagina che prima non ne aveva (un campo testo compil
 contenuto della pagina) - `SaveFilledFormAsync` rilancia l'indicizzazione dopo aver appiattito, per lo
 stesso motivo per cui già rilancia le miniature.
 
-**Verificato dal vivo** (UI Automation): parola presente solo nel testo nativo di una pagina trovata
-subito; parola presente solo nell'immagine scansionata di un'altra pagina trovata dopo l'OCR, con
-navigazione "Successivo" che salta esattamente alla pagina giusta; nessun risultato mostra "Nessun
-risultato"; il pulsante di chiusura nasconde la barra. Non verificato dal vivo: la scorciatoia Ctrl+F in
-sé (il tentativo di invio tasti simulato è stato interrotto dal controllo di sicurezza "la finestra in
-primo piano non è PDF26" prima di inviare nulla) - il meccanismo (`KeyboardAccelerator` dichiarativo su
-`SearchToggle`) è lo stesso schema standard già usato altrove in WinUI3, non testato live in questa sessione.
+**Verificato dal vivo** (UI Automation, incluso `AutomationElement.FocusedElement` per il focus tastiera -
+non solo uno screenshot): parola presente solo nel testo nativo di una pagina trovata subito, con
+l'esatto rettangolo evidenziato sulla parola; parola presente solo nell'immagine scansionata di un'altra
+pagina trovata dopo l'OCR, con navigazione "Successivo" che salta esattamente alla pagina giusta e la
+evidenzia; nessun risultato mostra "Nessun risultato"; chiudere la barra fa sparire l'evidenziazione,
+riaprirla senza ridigitare la fa tornare (`OnIsSearchOpenChanged`, ramo apertura); l'apertura porta subito
+il focus nella casella senza bisogno di un clic; zoom con un'evidenziazione attiva non l'ha rotta. Non
+verificato dal vivo: la scorciatoia Ctrl+F in sé (il tentativo di invio tasti simulato è stato interrotto
+dal controllo di sicurezza "la finestra in primo piano non è PDF26" prima di inviare nulla) - il
+meccanismo (`KeyboardAccelerator` dichiarativo su `SearchToggle`) è lo stesso schema standard già usato
+altrove in WinUI3, non testato live in questa sessione.
 
 ## Associazione file .pdf: perché solo HKCU e nessuna forzatura del default
 

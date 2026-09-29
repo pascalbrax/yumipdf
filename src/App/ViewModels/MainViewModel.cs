@@ -44,7 +44,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     // ---- Text search / OCR state (see the "Text search / OCR" region near the bottom) ----
     private readonly Dictionary<int, string> _pageText = new();
+    private readonly Dictionary<int, IReadOnlyList<OcrService.OcrWord>> _ocrWords = new();
     private readonly HashSet<int> _ocrPending = new();
+    private int _lastHighlightedPageIndex = -1;
     private CancellationTokenSource? _textIndexCts;
     private Task _textIndexTask = Task.CompletedTask;
     private Task _ocrLoop = Task.CompletedTask;
@@ -215,9 +217,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
             await StopTextIndexingAsync().ConfigureAwait(true);
             _pageText.Clear();
+            _ocrWords.Clear();
             _ocrPending.Clear();
             _searchMatchPages.Clear();
             _searchMatchPosition = -1;
+            _lastHighlightedPageIndex = -1;
             SearchStatusText = null;
             NotifyFindCommands();
 
@@ -1070,6 +1074,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
             // the user could have scrolled anywhere, so resuming Find should start fresh from
             // wherever they are now rather than from a stale position.
             _searchMatchPosition = -1;
+            ClearHighlights();
+        }
+        else
+        {
+            // Reopening with a query already typed (the box keeps it - only Highlights were
+            // cleared above) should show the highlight again if the page already on screen
+            // still matches, not wait for the user to press Successivo first.
+            RefreshCurrentPageHighlights();
         }
     }
 
@@ -1102,6 +1114,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         CurrentPageIndex = _searchMatchPages[_searchMatchPosition];
         UpdateSearchStatusText();
+        RefreshCurrentPageHighlights();
     }
 
     /// <summary>
@@ -1130,6 +1143,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         UpdateSearchStatusText();
         NotifyFindCommands();
+        RefreshCurrentPageHighlights();
     }
 
     private void UpdateSearchStatusText()
@@ -1157,6 +1171,102 @@ public partial class MainViewModel : ObservableObject, IDisposable
         FindPreviousCommand.NotifyCanExecuteChanged();
     }
 
+    private void ClearHighlights()
+    {
+        if (_lastHighlightedPageIndex >= 0 && _lastHighlightedPageIndex < Pages.Count)
+        {
+            Pages[_lastHighlightedPageIndex].SetHighlights(Array.Empty<(double, double, double, double)>(), Zoom);
+        }
+
+        _lastHighlightedPageIndex = -1;
+    }
+
+    /// <summary>
+    /// Highlights every occurrence of the current query on whichever page is on screen right
+    /// now, if that page is one search actually found (<see cref="MoveToMatch"/>/
+    /// <see cref="RefreshSearchMatches"/>, the only callers) - never more than one page's
+    /// worth of highlights exist at a time, matching the page-granularity the rest of search
+    /// already works at.
+    /// </summary>
+    private async void RefreshCurrentPageHighlights()
+    {
+        var document = _document;
+        var query = SearchQuery;
+        var pageIndex = CurrentPageIndex;
+
+        if (document is null
+            || string.IsNullOrWhiteSpace(query)
+            || pageIndex < 0 || pageIndex >= Pages.Count
+            || !_searchMatchPages.Contains(pageIndex))
+        {
+            ClearHighlights();
+            return;
+        }
+
+        if (_lastHighlightedPageIndex >= 0 && _lastHighlightedPageIndex != pageIndex && _lastHighlightedPageIndex < Pages.Count)
+        {
+            Pages[_lastHighlightedPageIndex].SetHighlights(Array.Empty<(double, double, double, double)>(), Zoom);
+        }
+
+        IReadOnlyList<(double Left, double Bottom, double Right, double Top)> rects;
+        try
+        {
+            rects = await ComputeHighlightRectsAsync(document, pageIndex, query).ConfigureAwait(true);
+        }
+        catch (Exception)
+        {
+            // A highlight is decoration - failing to compute one must not disturb search itself.
+            return;
+        }
+
+        // The user (or a new document/query) moved on while the line above was awaiting -
+        // painting highlights for a page that is no longer shown, or a query no longer
+        // current, would be actively wrong, not just stale.
+        if (!ReferenceEquals(document, _document) || pageIndex != CurrentPageIndex || query != SearchQuery || pageIndex >= Pages.Count)
+        {
+            return;
+        }
+
+        Pages[pageIndex].SetHighlights(rects, Zoom);
+        _lastHighlightedPageIndex = pageIndex;
+    }
+
+    /// <summary>
+    /// A native-text page asks PDFium directly (its own find API - read-only, unrelated to the
+    /// page-object *write* APIs behind the abandoned OCR "sandwich", see docs/ARCHITECTURE.md
+    /// "OCR"). A page recognized via OCR has no such API to ask, so it matches each recognized
+    /// word's own text against the query instead - which means a multi-word query split across
+    /// two OCR words (rare: it needs the whole phrase to sit inside one scanned page) will not
+    /// highlight, even though the page still correctly shows up as a match.
+    /// </summary>
+    private async Task<IReadOnlyList<(double Left, double Bottom, double Right, double Top)>> ComputeHighlightRectsAsync(PdfDocument document, int pageIndex, string query)
+    {
+        if (_ocrWords.TryGetValue(pageIndex, out var words))
+        {
+            var placeholder = Pages[pageIndex];
+            var pageWidthPt = placeholder.PointWidth;
+            var pageHeightPt = placeholder.PointHeight;
+            var ocrHeightPx = pageWidthPt > 0 ? Math.Max(1, OcrPixelWidth * pageHeightPt / pageWidthPt) : OcrPixelWidth;
+            var scaleX = pageWidthPt / OcrPixelWidth;
+            var scaleY = pageHeightPt / ocrHeightPx;
+
+            return words
+                .Where(word => word.Text.Contains(query, StringComparison.OrdinalIgnoreCase))
+                .Select(word => (
+                    Left: word.X * scaleX,
+                    Bottom: pageHeightPt - (word.Y + word.Height) * scaleY,
+                    Right: (word.X + word.Width) * scaleX,
+                    Top: pageHeightPt - word.Y * scaleY))
+                .ToList();
+        }
+
+        return await Task.Run(() =>
+        {
+            using var page = document.GetPage(pageIndex);
+            return page.FindTextRects(query);
+        }).ConfigureAwait(true);
+    }
+
     /// <summary>
     /// Builds the page-to-text index search runs against: fast native extraction
     /// (<see cref="PdfPage.HasExtractableText"/>) for every page first, then queues an OCR
@@ -1171,6 +1281,17 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             return;
         }
+
+        // Idempotent for the "just opened a document" caller (OpenAsync already cleared these
+        // itself before this point) - not for the "just flattened" one, which calls this again
+        // on the same still-open document and needs the previous pass's results discarded: a
+        // page that had no text before flattening can gain some (a filled text field's value
+        // gets baked into the page content), so its stale "no text, queued for OCR" state must
+        // not linger.
+        _pageText.Clear();
+        _ocrWords.Clear();
+        _ocrPending.Clear();
+        ClearHighlights();
 
         _textIndexCts?.Cancel();
         var cts = new CancellationTokenSource();
@@ -1302,13 +1423,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
                         break;
                     }
 
-                    var text = await ocr.RecognizeAsync(bgra, OcrPixelWidth, height).ConfigureAwait(true);
+                    var result = await ocr.RecognizeAsync(bgra, OcrPixelWidth, height).ConfigureAwait(true);
                     if (token.IsCancellationRequested)
                     {
                         break;
                     }
 
-                    _pageText[index] = text;
+                    _pageText[index] = result.Text;
+                    _ocrWords[index] = result.Words;
                     RefreshSearchMatches(resetPosition: false);
                 }
                 catch (OperationCanceledException)

@@ -96,9 +96,16 @@ public sealed partial class MainWindow : Window
         else if (e.PropertyName == nameof(MainViewModel.IsSearchOpen) && ViewModel.IsSearchOpen)
         {
             // Ctrl+F (or the toolbar toggle) should let the user start typing immediately,
-            // not just show an empty bar they then have to click into.
-            SearchBox.Focus(FocusState.Programmatic);
-            SearchBox.SelectAll();
+            // not just show an empty bar they then have to click into. Deferred a tick: the
+            // bar's Visibility flips to Visible on this same property-changed event (x:Bind's
+            // own subscriber runs first, registered earlier in InitializeComponent), but an
+            // element that was Collapsed a moment ago has not been through a layout pass yet,
+            // and Focus() on it can silently fail before that happens.
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                SearchBox.Focus(FocusState.Programmatic);
+                SearchBox.SelectAll();
+            });
         }
     }
 

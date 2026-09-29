@@ -397,4 +397,33 @@ internal static class PdfiumNative
     // binding grew out of.
     [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
     public static extern int FPDFText_GetText(IntPtr textPage, int startIndex, int count, [Out] byte[] buffer);
+
+    // ---- fpdf_text.h : find, for the search result highlight overlay ----------------------
+    // Read-only and page-scoped, unlike the page-object *write* APIs (FPDFPageObj_NewTextObj
+    // and friends) explored for the OCR "sandwich" - a real, unresolved rendering bug was
+    // found there (see docs/ARCHITECTURE.md "OCR"). Nothing here touches page content.
+
+    public const uint FPDF_MATCHCASE = 0x00000001;
+    public const uint FPDF_MATCHWHOLEWORD = 0x00000002;
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern IntPtr FPDFText_FindStart(IntPtr textPage, IntPtr findWhat, uint flags, int startIndex);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern bool FPDFText_FindNext(IntPtr searchHandle);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern int FPDFText_GetSchResultIndex(IntPtr searchHandle);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern int FPDFText_GetSchCount(IntPtr searchHandle);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern void FPDFText_FindClose(IntPtr searchHandle);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern int FPDFText_CountRects(IntPtr textPage, int startIndex, int count);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern bool FPDFText_GetRect(IntPtr textPage, int rectIndex, out double left, out double top, out double right, out double bottom);
 }

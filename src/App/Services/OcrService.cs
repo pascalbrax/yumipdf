@@ -39,18 +39,34 @@ public sealed class OcrService
     public string RecognizerLanguageTag => _engine!.RecognizerLanguage.LanguageTag;
 
     /// <summary>
-    /// Recognizes text in a BGRA8 page render (the same buffer shape <c>PdfPage.RenderToBgra</c>
-    /// produces). Returns the whole page's text as <see cref="OcrResult.Text"/> already joins it -
-    /// good enough for keyword search, which is all <c>MainViewModel</c>'s OCR pass is for today;
-    /// word-level positions were investigated (docs/ARCHITECTURE.md "OCR") but a real bug in
-    /// placing them was never root-caused, so this deliberately does not attempt per-word placement.
+    /// One recognized word and its bounding box in the pixel space of the bitmap that was
+    /// recognized - for the on-page search-highlight overlay (<c>MainViewModel</c>). Never
+    /// written into the PDF itself: the "sandwich" (an invisible text layer positioned per
+    /// word, so the recognized text becomes part of the file) was investigated separately and
+    /// had a real, unresolved rendering bug for a minority of words - see docs/ARCHITECTURE.md
+    /// "OCR". A screen-only overlay never goes through that code path.
     /// </summary>
-    public async Task<string> RecognizeAsync(byte[] bgra, int pixelWidth, int pixelHeight)
+    public sealed record OcrWord(string Text, double X, double Y, double Width, double Height);
+
+    public sealed record OcrPageResult(string Text, IReadOnlyList<OcrWord> Words);
+
+    /// <summary>
+    /// Recognizes text in a BGRA8 page render (the same buffer shape <c>PdfPage.RenderToBgra</c>
+    /// produces). <see cref="OcrPageResult.Text"/> is <see cref="OcrResult.Text"/>, already
+    /// joined by Windows - what keyword search matches against; <see cref="OcrPageResult.Words"/>
+    /// is only for the highlight overlay (see <see cref="OcrWord"/>'s remarks on why it never
+    /// feeds back into the PDF itself).
+    /// </summary>
+    public async Task<OcrPageResult> RecognizeAsync(byte[] bgra, int pixelWidth, int pixelHeight)
     {
         using var bitmap = new SoftwareBitmap(BitmapPixelFormat.Bgra8, pixelWidth, pixelHeight, BitmapAlphaMode.Ignore);
         bitmap.CopyFromBuffer(bgra.AsBuffer());
 
         var result = await _engine!.RecognizeAsync(bitmap);
-        return result.Text;
+        var words = result.Lines
+            .SelectMany(line => line.Words)
+            .Select(word => new OcrWord(word.Text, word.BoundingRect.X, word.BoundingRect.Y, word.BoundingRect.Width, word.BoundingRect.Height))
+            .ToList();
+        return new OcrPageResult(result.Text, words);
     }
 }

@@ -264,6 +264,30 @@
                                                 </DataTemplate>
                                             </ItemsControl.ItemTemplate>
                                         </ItemsControl>
+
+                                        <!--
+                                            Search-result highlights: purely a screen overlay,
+                                            drawn the same way as the field overlays above but
+                                            never written into the PDF - see PdfPageViewModel.
+                                            Highlights/MainViewModel's "Text search / OCR"
+                                            region. Not hit-test visible, so it never steals a
+                                            click meant for the page or a field underneath it.
+                                        -->
+                                        <ItemsControl ItemsSource="{x:Bind Highlights}" IsTabStop="False" IsHitTestVisible="False"
+                                                      Width="{x:Bind PixelWidth, Mode=OneWay}" Height="{x:Bind PixelHeight, Mode=OneWay}">
+                                            <ItemsControl.ItemsPanel>
+                                                <ItemsPanelTemplate>
+                                                    <Grid />
+                                                </ItemsPanelTemplate>
+                                            </ItemsControl.ItemsPanel>
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate x:DataType="vm:PdfSearchHighlightViewModel">
+                                                    <Rectangle Margin="{x:Bind Margin}" Width="{x:Bind Width}" Height="{x:Bind Height}"
+                                                               HorizontalAlignment="Left" VerticalAlignment="Top"
+                                                               Fill="#802683DB" />
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
                                     </Grid>
                                 </Border>
                             </DataTemplate>

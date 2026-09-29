@@ -21,6 +21,38 @@ public class PdfPageTextTests
     }
 
     [Fact]
+    public void FindTextRects_OnATextPage_FindsTheWord()
+    {
+        using var document = PdfDocument.OpenFromPath(FixturePath("text-page.pdf"));
+        using var page = document.GetPage(0);
+
+        var rects = page.FindTextRects("mondo");
+
+        Assert.Single(rects);
+        var (left, bottom, right, top) = rects[0];
+        Assert.True(right > left);
+        Assert.True(top > bottom);
+    }
+
+    [Fact]
+    public void FindTextRects_IsCaseInsensitive()
+    {
+        using var document = PdfDocument.OpenFromPath(FixturePath("text-page.pdf"));
+        using var page = document.GetPage(0);
+
+        Assert.Single(page.FindTextRects("MONDO"));
+    }
+
+    [Fact]
+    public void FindTextRects_WithNoMatch_ReturnsEmpty()
+    {
+        using var document = PdfDocument.OpenFromPath(FixturePath("text-page.pdf"));
+        using var page = document.GetPage(0);
+
+        Assert.Empty(page.FindTextRects("assente"));
+    }
+
+    [Fact]
     public void HasExtractableText_OnAnImageOnlyPage_IsFalse()
     {
         using var document = PdfDocument.OpenFromPath(FixturePath("image-only-page.pdf"));
