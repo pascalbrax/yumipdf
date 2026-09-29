@@ -258,7 +258,16 @@ public sealed partial class MainWindow : Window
 
     private async void OnFitWidthClicked(object sender, RoutedEventArgs e) => await FitWidthToViewportAsync();
 
-    /// <summary>Fits the widest page to the room the pages currently have - see <see cref="MainViewModel.FitWidthAsync"/> for why the widest.</summary>
+    /// <summary>
+    /// Fits the page the user is actually looking at - not some other page. A document can mix
+    /// page sizes/orientations (a landscape page among portrait ones); fitting to any page but
+    /// the current one leaves that current page wrong (too small, or cropped) regardless of
+    /// which other page's dimensions were used instead. Deliberately does not react to
+    /// <see cref="MainViewModel.CurrentPageIndex"/> changing on its own - the user confirmed
+    /// the fit should stay put when browsing to a different page, not silently re-zoom under
+    /// them; only the room available (<see cref="OnPagesViewportSizeChanged"/>) re-triggers it,
+    /// which still means "the same current page, now shown in a different amount of room".
+    /// </summary>
     private Task FitWidthToViewportAsync()
     {
         if (ViewModel.Pages.Count == 0)
@@ -266,8 +275,8 @@ public sealed partial class MainWindow : Window
             return Task.CompletedTask;
         }
 
-        var widestPagePoints = ViewModel.Pages.Max(page => page.PointWidth);
-        return ViewModel.FitWidthAsync(PagesScrollViewer.ViewportWidth, widestPagePoints);
+        var currentPage = ViewModel.Pages[Math.Clamp(ViewModel.CurrentPageIndex, 0, ViewModel.Pages.Count - 1)];
+        return ViewModel.FitWidthAsync(PagesScrollViewer.ViewportWidth, currentPage.PointWidth);
     }
 
     /// <summary>
@@ -300,6 +309,7 @@ public sealed partial class MainWindow : Window
         _refitTimer.Start();
     }
 
+    /// <summary>Fits the page the user is actually looking at - see <see cref="FitWidthToViewportAsync"/>'s remarks (the same reasoning applies here, minus the room-change re-trigger: "Adatta a pagina" was already a one-shot action, not a persistent mode).</summary>
     private async void OnFitPageClicked(object sender, RoutedEventArgs e)
     {
         if (ViewModel.Pages.Count == 0)
@@ -307,9 +317,9 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        var firstPage = ViewModel.Pages[0];
-        var pageWidthPoints = firstPage.PixelWidth / ViewModel.Zoom;
-        var pageHeightPoints = firstPage.PixelHeight / ViewModel.Zoom;
+        var currentPage = ViewModel.Pages[Math.Clamp(ViewModel.CurrentPageIndex, 0, ViewModel.Pages.Count - 1)];
+        var pageWidthPoints = currentPage.PixelWidth / ViewModel.Zoom;
+        var pageHeightPoints = currentPage.PixelHeight / ViewModel.Zoom;
         await ViewModel.FitPageAsync(PagesScrollViewer.ViewportWidth, PagesScrollViewer.ViewportHeight, pageWidthPoints, pageHeightPoints);
     }
 

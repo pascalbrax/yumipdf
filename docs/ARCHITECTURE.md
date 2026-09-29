@@ -80,6 +80,32 @@ dell'hardware Direct3D (~16384px per lato) oltre a diventare enorme in memoria (
 `MainViewModel.ComputeMaxZoomForDocument` limita lo zoom massimo selezionabile in base alla pagina piu'
 grande del documento aperto, restando sotto una soglia di sicurezza (`SafeMaxPixelDimension`, 8192px).
 
+## "Adatta a larghezza"/"Adatta a pagina": solo la pagina corrente, non riadattano da soli scorrendo
+
+`MainWindow.FitWidthToViewportAsync`/`OnFitPageClicked` calcolano lo zoom sulla larghezza/dimensioni
+della pagina indicata da `MainViewModel.CurrentPageIndex` - mai la prima pagina del documento, mai la
+più larga. In un documento con formati misti (una pagina orizzontale tra pagine verticali, per esempio)
+adattare a una pagina diversa da quella che si sta guardando lascia comunque quella corrente sbagliata,
+qualunque sia l'altra pagina scelta come riferimento - era già capitato con la pagina più larga usata in
+un tentativo precedente di questa stessa funzione, per un motivo diverso (vedi sotto).
+
+Scelta esplicita dell'utente, non un'assunzione: cambiando pagina (frecce, scorrimento, ricerca) mentre
+"Adatta a larghezza" è attivo, lo zoom **non si ricalcola da solo** sulla nuova pagina - resta quello
+calcolato per la pagina su cui era stato premuto il pulsante, finché non lo si preme di nuovo. Non è un
+taglio per compromesso: era l'alternativa esplicitamente scartata (l'altra avrebbe fatto ricalcolare lo
+zoom ad ogni pagina, come un vero "adatta sempre", cambiando continuamente ingrandimento scorrendo un
+documento a formati misti).
+
+Quello che invece resta un riadattamento automatico: se lo spazio disponibile per le pagine cambia
+restando sulla stessa pagina (si apre/chiude la zona miniature o il pannello moduli, si ridimensiona la
+finestra), `OnPagesViewportSizeChanged` fa ripartire il calcolo - ma sempre per la pagina corrente, mai
+per un'altra. È lo stesso meccanismo introdotto per il bug precedente ("il documento non era più
+centrato aprendo le miniature"): quel bug aveva due cause, lo zoom che non si aggiornava quando cambiava
+lo spazio disponibile (`IsFitWidthActive` come modalità persistente, non un calcolo una tantum) e l'uso
+della pagina più larga del documento invece di quella attuale - la prima parte del fix resta valida
+(l'`IsFitWidthActive` continua a seguire i cambi di spazio), la seconda è quella corretta qui (ora è la
+pagina corrente, non la più larga).
+
 ## AcroForm filling (M2): layout verificato, scrittura implementata
 
 `FPDF_FORMFILLINFO` (lo struct C con ~35 campi/puntatori a funzione che PDFium usa per le callback

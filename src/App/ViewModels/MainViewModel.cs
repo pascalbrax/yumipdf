@@ -298,7 +298,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public bool IsFitWidthActive { get; private set; }
 
     /// <summary>Sets zoom so a page of <paramref name="pageWidthPoints"/> fills <paramref name="viewportWidthPixels"/> (minus a small margin).</summary>
-    /// <param name="pageWidthPoints">The <em>widest</em> page's width: every page then fits, and narrower ones are centered. The first page's width would leave a wider later page overflowing and the whole column off-center.</param>
+    /// <param name="pageWidthPoints">
+    /// The width of the page the user is currently looking at - deliberately not some other
+    /// page (e.g. the document's widest), even though a mixed-size document then fits each page
+    /// differently as the user browses to it: fitting to any page but the current one leaves
+    /// the current one wrong regardless of which other page's width was used instead. The
+    /// caller (<c>MainWindow.FitWidthToViewportAsync</c>) is the one that reads
+    /// <c>MainViewModel.CurrentPageIndex</c> for it.
+    /// </param>
     public Task FitWidthAsync(double viewportWidthPixels, double pageWidthPoints)
     {
         if (pageWidthPoints <= 0 || viewportWidthPixels <= 0)
