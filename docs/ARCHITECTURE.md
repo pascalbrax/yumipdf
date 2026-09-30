@@ -380,6 +380,23 @@ anti-hijacking) - anche volendo, non sarebbe possibile farlo in modo affidabile 
 "Apri le impostazioni predefinite di Windows" nello stesso dialogo apre `ms-settings:defaultapps`, dove
 l'utente completa la scelta dalla UI di sistema.
 
+## Versionamento e finestra "Informazioni"
+
+Un solo `<Version>` in `Directory.Build.props` (radice del repository, raccolto automaticamente da
+MSBuild per ogni progetto della solution - App, PdfEngine, Printing, PdfEngine.Tests) invece di
+duplicarlo in ogni `.csproj`: da lì derivano `AssemblyVersion`/`FileVersion`/`InformationalVersion` per
+tutti, a meno che un progetto non li sovrascriva esplicitamente (nessuno lo fa oggi). Si parte da `0.1.0`
+(nessun installer/M4 ancora, quindi non ancora una `1.0.0`). Lo stesso file imposta anche `Company`/
+`Copyright`, letti da Esplora file nella scheda Dettagli dell'eseguibile.
+
+**Nota**: l'SDK .NET, rilevando la cartella `.git`, appende automaticamente l'hash del commit
+all'`InformationalVersion`/`ProductVersion` (es. `0.1.0+e448232...`) - utile in `FileVersionInfo` per
+risalire alla build esatta, troppo lungo per una UI rivolta all'utente. `AboutDialog` (`Views/`,
+`ContentDialog` come `SettingsDialog` - un'app WinUI3 unpackaged non ha bisogno di una finestra
+separata, e una `ContentDialog` vive già dentro `MainWindow`, coerente con la nota su `WindowIcon`)
+legge `ProductVersion` via `FileVersionInfo.GetVersionInfo` (non `Assembly.GetName().Version`, che
+riporta solo `AssemblyVersion`, sempre a 4 cifre tipo `0.1.0.0`) e mostra solo la parte prima del `+`.
+
 ## Nota sul nome dell'assembly
 
 L'app si chiama **PDF26** (non 26PDF): il generatore di sorgenti CsWinRT (usato da WinUI3/Windows App SDK

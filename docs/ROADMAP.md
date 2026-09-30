@@ -22,6 +22,7 @@
 - [x] Navigazione da miniature: zona a scomparsa a sinistra con un "Cover Flow" verticale (`CoverFlowStrip`), animato e interattivo (clic, trascinamento, rotella, tastiera). Solo per documenti con 3+ pagine; miniature generate in background dopo il caricamento completo (vedi docs/ARCHITECTURE.md "Miniature"). Verificato con UI Automation e screenshot; il clic reale del mouse sulle miniature non è stato provato (lo script di input simulato è stato bloccato dall'antivirus)
 - [ ] Navigazione dall'indice (bookmark, `FPDFBookmark_*`) - rimandato: binding nativi aggiuntivi + pannello laterale
 - [ ] Virtualizzazione reale del viewport (oggi ogni pagina viene comunque renderizzata e tenuta in memoria, solo in modo progressivo/asincrono - per documenti molto grandi serebbe da scaricare/saltare le pagine lontane dallo scroll corrente)
+- [x] Versionamento (`Directory.Build.props`, un solo `<Version>` per tutti i progetti) e finestra "Informazioni" (`AboutDialog`: versione, breve descrizione, licenze di terze parti)
 
 ## M2 - Compilazione moduli (scrittura)
 - [x] Verificato il layout di `FPDF_FORMFILLINFO` contro l'header reale scaricato dalla release GitHub di `bblanchon/pdfium-binaries` corrispondente alla versione NuGet in uso - trovati e corretti due bug (campo `xfa_disabled` mancante, `FORM_ReplaceSelection` dichiarata con reso sbagliato). Vedi docs/ARCHITECTURE.md "AcroForm filling".

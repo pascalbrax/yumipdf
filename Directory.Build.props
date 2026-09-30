@@ -1,0 +1,15 @@
+<Project>
+
+  <!--
+    Picked up automatically by MSBuild for every project under this directory (App, PdfEngine,
+    Printing, PdfEngine.Tests) - a single place to bump the version instead of editing each
+    .csproj. AssemblyVersion/FileVersion/InformationalVersion/the NuGet package version all
+    derive from Version unless a project overrides them explicitly.
+  -->
+  <PropertyGroup>
+    <Version>0.1.0</Version>
+    <Company>Pascal Brax</Company>
+    <Copyright>© $([System.DateTime]::Now.Year) Pascal Brax</Copyright>
+  </PropertyGroup>
+
+</Project>

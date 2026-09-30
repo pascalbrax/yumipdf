@@ -355,6 +355,16 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    private async void OnAboutClicked(object sender, RoutedEventArgs e)
+    {
+        var dialog = new AboutDialog
+        {
+            XamlRoot = Content.XamlRoot,
+        };
+
+        await dialog.ShowAsync();
+    }
+
     private async void OnSaveFilledFormClicked(object sender, RoutedEventArgs e)
     {
         var picker = new FileSavePicker();

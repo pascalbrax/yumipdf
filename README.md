@@ -17,6 +17,8 @@ Visualizzatore, editor e compilatore di moduli PDF nativo per Windows 10 e 11.
   opzionale (rende i valori permanenti, non più modificabili in quella sessione)
 - Annotazione di evidenziazione
 - Stampa (dialogo nativo, intervallo pagine)
+- Selezione del testo per trascinamento (solo pagine con testo nativo), con copia automatica negli appunti
+- Finestra "Informazioni" (versione, licenze di terze parti)
 
 Combo box/list box modificabili, la ricerca testo, la navigazione da miniature/indice, le annotazioni
 avanzate (nota, disegno libero, timbro) e l'installer sono pianificati nelle milestone successive - vedi

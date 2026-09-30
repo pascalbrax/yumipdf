@@ -38,6 +38,8 @@
             </AppBarToggleButton>
             <AppBarSeparator />
             <AppBarButton Icon="Setting" Label="Opzioni..." Click="OnSettingsClicked" />
+            <AppBarSeparator />
+            <AppBarButton Icon="Help" Label="Informazioni" Click="OnAboutClicked" />
         </CommandBar>
 
         <!--
