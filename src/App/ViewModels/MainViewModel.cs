@@ -718,7 +718,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             {
                 using var page = document.GetPage(index);
                 var (widthPt, heightPt) = page.SizeInPoints;
-                var placeholder = new PdfPageViewModel(index, widthPt, heightPt, zoom);
+                var placeholder = new PdfPageViewModel(index, widthPt, heightPt, zoom, this);
 
                 // Editable/checkable fields on this page get an in-place overlay drawn on top
                 // of the page bitmap (see PdfPageViewModel.Fields) - read-only field types
@@ -1335,6 +1335,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
             {
                 _ocrPending.Add(pageIndex);
             }
+
+            // Gates drag-to-select for this page (PdfTextSelectionOverlay) - a page starts
+            // without it (PdfPageViewModel's own default) until this pass reaches it, so
+            // selection only ever turns on, never off, for a given document.
+            if (pageIndex < Pages.Count)
+            {
+                Pages[pageIndex].HasNativeText = hasText;
+            }
         }
 
         RefreshSearchMatches(resetPosition: false);
@@ -1467,6 +1475,59 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var next = _ocrPending.Min();
         _ocrPending.Remove(next);
         return next;
+    }
+
+    // ---- Text selection --------------------------------------------------------------------
+    // The actual PDFium calls behind PdfPageViewModel.BeginTextSelection/ExtendTextSelection/
+    // EndTextSelectionAsync (native access lives here, same as the search/OCR region above -
+    // PdfPageViewModel just owns the drag state and calls back into whichever of these three
+    // it needs). Every one of these is a no-op-shaped Task on a closed/no document, since a
+    // drag started on one document can still be mid-flight when it closes.
+
+    /// <summary>Hit-tests a point (PDF point space) to a character index, or -1.</summary>
+    public async Task<int> HitTestCharAsync(int pageIndex, double xPt, double yPt)
+    {
+        if (_document is not { } document)
+        {
+            return -1;
+        }
+
+        return await Task.Run(() =>
+        {
+            using var page = document.GetPage(pageIndex);
+            return page.GetCharIndexAt(xPt, yPt);
+        }).ConfigureAwait(true);
+    }
+
+    /// <summary>One step of dragging a selection - see <see cref="PdfPage.HitTestAndSelect"/>.</summary>
+    public async Task<(int CharIndex, IReadOnlyList<(double Left, double Bottom, double Right, double Top)> Rects)> HitTestAndSelectAsync(
+        int pageIndex, int anchorCharIndex, double xPt, double yPt)
+    {
+        if (_document is not { } document)
+        {
+            return (-1, Array.Empty<(double, double, double, double)>());
+        }
+
+        return await Task.Run(() =>
+        {
+            using var page = document.GetPage(pageIndex);
+            return page.HitTestAndSelect(anchorCharIndex, xPt, yPt);
+        }).ConfigureAwait(true);
+    }
+
+    /// <summary>The text a finished selection covers, for the copy tooltip.</summary>
+    public async Task<string> ExtractSelectionTextAsync(int pageIndex, int fromChar, int toChar)
+    {
+        if (_document is not { } document)
+        {
+            return string.Empty;
+        }
+
+        return await Task.Run(() =>
+        {
+            using var page = document.GetPage(pageIndex);
+            return page.ExtractTextRange(fromChar, toChar);
+        }).ConfigureAwait(true);
     }
 
     public void Dispose()

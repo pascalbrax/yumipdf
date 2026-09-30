@@ -239,6 +239,114 @@ public sealed class PdfPage : IDisposable
             return results;
         });
 
+    /// <summary>
+    /// Character index (0-based, into this page's own text - same indexing as <see cref="ExtractText"/>)
+    /// at the given point in PDF point space, or -1 if no character is within
+    /// <paramref name="tolerancePt"/> of it. Only the first step of a text-selection drag
+    /// (finding where it starts) - see <see cref="HitTestAndSelect"/> for every step after that.
+    /// </summary>
+    public int GetCharIndexAt(double xPt, double yPt, double tolerancePt = 4.0)
+        => PdfiumRuntime.Invoke(() =>
+        {
+            ThrowIfDisposed();
+            var textPage = PdfiumNative.FPDFText_LoadPage(_handle);
+            if (textPage == IntPtr.Zero)
+            {
+                return -1;
+            }
+
+            try
+            {
+                return PdfiumNative.FPDFText_GetCharIndexAtPos(textPage, xPt, yPt, tolerancePt, tolerancePt);
+            }
+            finally
+            {
+                PdfiumNative.FPDFText_ClosePage(textPage);
+            }
+        });
+
+    /// <summary>
+    /// One step of dragging a text selection: hit-tests <paramref name="xPt"/>/<paramref name="yPt"/>
+    /// (PDF point space) and, if it lands on a character, returns that character's index
+    /// together with every rectangle covering the range from <paramref name="anchorCharIndex"/>
+    /// to it (order-independent, so dragging up/left of the anchor works the same as
+    /// down/right) - built in the same native call so one pointer move needs only one round
+    /// trip. <c>CharIndex</c> is -1 (<c>Rects</c> empty) if the point does not land on a
+    /// character - the caller then just keeps whatever selection it already had.
+    /// </summary>
+    public (int CharIndex, IReadOnlyList<(double Left, double Bottom, double Right, double Top)> Rects) HitTestAndSelect(
+        int anchorCharIndex, double xPt, double yPt, double tolerancePt = 4.0)
+        => PdfiumRuntime.Invoke(() =>
+        {
+            ThrowIfDisposed();
+            var rects = new List<(double, double, double, double)>();
+            var textPage = PdfiumNative.FPDFText_LoadPage(_handle);
+            if (textPage == IntPtr.Zero)
+            {
+                return (-1, (IReadOnlyList<(double, double, double, double)>)rects);
+            }
+
+            try
+            {
+                var charIndex = PdfiumNative.FPDFText_GetCharIndexAtPos(textPage, xPt, yPt, tolerancePt, tolerancePt);
+                if (charIndex >= 0)
+                {
+                    rects.AddRange(RectsForRange(textPage, anchorCharIndex, charIndex));
+                }
+
+                return (charIndex, (IReadOnlyList<(double, double, double, double)>)rects);
+            }
+            finally
+            {
+                PdfiumNative.FPDFText_ClosePage(textPage);
+            }
+        });
+
+    /// <summary>Text of character range [a, b] (inclusive, order-independent) - the actual text a selection covers, for the copy tooltip.</summary>
+    public string ExtractTextRange(int a, int b)
+        => PdfiumRuntime.Invoke(() =>
+        {
+            ThrowIfDisposed();
+            var textPage = PdfiumNative.FPDFText_LoadPage(_handle);
+            if (textPage == IntPtr.Zero)
+            {
+                return string.Empty;
+            }
+
+            try
+            {
+                var from = Math.Min(a, b);
+                var to = Math.Max(a, b);
+                var count = to - from + 1;
+                var buffer = new byte[(count + 1) * 2];
+                var written = PdfiumNative.FPDFText_GetText(textPage, from, count, buffer);
+                return System.Text.Encoding.Unicode.GetString(buffer, 0, Math.Max(0, written - 1) * 2);
+            }
+            finally
+            {
+                PdfiumNative.FPDFText_ClosePage(textPage);
+            }
+        });
+
+    /// <summary>Shared by <see cref="HitTestAndSelect"/> - every rectangle (PDF point space) covering character range [a, b] (inclusive, order-independent). Caller owns <paramref name="textPage"/>'s lifetime.</summary>
+    private static List<(double Left, double Bottom, double Right, double Top)> RectsForRange(IntPtr textPage, int a, int b)
+    {
+        var results = new List<(double, double, double, double)>();
+        var from = Math.Min(a, b);
+        var to = Math.Max(a, b);
+        var count = to - from + 1;
+        var rectCount = PdfiumNative.FPDFText_CountRects(textPage, from, count);
+        for (var i = 0; i < rectCount; i++)
+        {
+            if (PdfiumNative.FPDFText_GetRect(textPage, i, out var left, out var top, out var right, out var bottom))
+            {
+                results.Add((left, bottom, right, top));
+            }
+        }
+
+        return results;
+    }
+
     internal IntPtr Handle
     {
         get

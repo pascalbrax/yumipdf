@@ -317,6 +317,57 @@ dal controllo di sicurezza "la finestra in primo piano non è PDF26" prima di in
 meccanismo (`KeyboardAccelerator` dichiarativo su `SearchToggle`) è lo stesso schema standard già usato
 altrove in WinUI3, non testato live in questa sessione.
 
+## Selezione del testo (drag-to-select) - solo pagine con testo nativo
+
+Trascinare il mouse su una pagina ne seleziona il testo (evidenziazione blu chiara, in
+`PdfPageViewModel.Selection` - stessa forma di `Highlights` ma collezione separata, così una selezione
+e un risultato di ricerca non si sovrascrivono) e al rilascio del mouse copia subito il testo negli
+appunti, deseleziona (`PdfPageViewModel.ReportTextCopied`, chiamata da `PdfTextSelectionOverlay` appena
+dopo `Clipboard.SetContent`) e conferma nella barra di stato ("Testo copiato negli appunti.", tramite
+`MainViewModel.InfoMessage` - lo stesso meccanismo già usato per altre conferme come il salvataggio di
+un modulo compilato). Nessuna UI di conferma propria (niente flyout/tooltip): la copia è automatica, non
+un'azione separata dal trascinamento. **Attiva solo sulle pagine con testo nativo** (`PdfPageViewModel.HasNativeText`,
+impostato da `MainViewModel` nello stesso punto in cui popola `_pageText` durante il passaggio nativo -
+si veda "Ricerca testo e OCR" sopra): una pagina scansionata (OCR-only) non supporta la selezione, per
+scelta esplicita del prodotto - la granularità per-parola dell'OCR non giustificava l'complessità di
+un'API di selezione separata per quel caso.
+
+**Livello di hit-test** (`PdfTextSelectionOverlay`, `Views/`): un `Panel` trasparente disegnato sopra il
+bitmap della pagina, con `IsHitTestVisible` legato a `HasNativeText` (aggiornato anche a runtime, se
+l'indicizzazione lo scopre dopo che il controllo esiste già) - una pagina senza testo nativo lascia quindi
+passare i click a quel che c'è sotto. `Panel`, non `Border`: `Border` è `sealed` in WinUI3, non derivabile.
+
+**Hit-testing carattere-per-carattere** (`PdfPage.GetCharIndexAt`/`HitTestAndSelect`, nuove binding
+`FPDFText_GetCharIndexAtPos`): stesso approccio in punti PDF (bottom-up) già usato per i rettangoli di
+ricerca, con la stessa trasformazione pixel→punto (inversa di quella in `RebuildHighlights`) usata da
+`PdfPageViewModel.ToPagePoint`. `HitTestAndSelect` fa hit-test e calcola i rettangoli della selezione
+nella stessa chiamata nativa, per un solo round-trip a movimento del puntatore.
+
+**Coalescenza dei movimenti** (`PdfPageViewModel.RunExtendAsync`): un trascinamento reale genera più
+`PointerMoved` di quanti round-trip nativi riescano a starci dietro - invece di accumulare chiamate,
+mentre una è in corso il punto più recente viene solo annotato (`_pendingDragPoint`) e ripreso appena
+quella finisce, così un movimento rapido non rischia mai che una risposta più vecchia sovrascriva una
+più nuova.
+
+**Un clic senza trascinamento non seleziona nulla** (`EndTextSelectionAsync`: se il carattere finale
+coincide con quello iniziale, torna stringa vuota e pulisce l'evidenziazione) - lo stesso comportamento
+di un editor di testo normale, dove il clic piazza solo il cursore.
+
+**Verificato dal vivo, con una scoperta di metodo**: il primo giro di test (simulando il trascinamento
+con `SetCursorPos` assoluto più `mouse_event` di down/up) sembrava non funzionare mai, su nessun file -
+log aggiunti temporaneamente hanno mostrato che il hit-test *stesso* funzionava benissimo (carattere
+giusto trovato, coordinate corrette), ma ogni chiamata di `PointerMoved` durante il trascinamento
+riportava la stessa posizione del clic iniziale: `SetCursorPos` non genera movimento "vero" agli occhi
+della pipeline puntatore di WinUI una volta che il pulsante è catturato (`CapturePointer`). Passando a
+`mouse_event(MOUSEEVENTF_MOVE, dx, dy, ...)` con spostamenti relativi e piccoli step, il trascinamento ha
+funzionato correttamente al primo tentativo utile: testo selezionato, evidenziazione visibile, testo
+copiato negli appunti al rilascio coincidente con l'evidenziazione. Anche il primo
+file di prova (`cento_pagine.pdf`, generato in una sessione precedente) si era rivelato **senza testo
+nativo proprio** (il suo contenuto testuale in `_pageText` veniva solo dall'OCR) - la selezione che non
+si attivava lì era quindi corretta, non un bug: l'individuazione del vero problema (la simulazione del
+trascinamento) è arrivata solo dopo aver isolato e scartato questa causa con un file di controllo noto
+per avere testo nativo vero (`tests/PdfEngine.Tests/Fixtures/text-page.pdf`, "Ciao mondo").
+
 ## Associazione file .pdf: perché solo HKCU e nessuna forzatura del default
 
 `Services/FileAssociationService.cs` registra PDF26 come app candidata per aprire i `.pdf` **solo su richiesta

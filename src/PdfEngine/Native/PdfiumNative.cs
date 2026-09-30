@@ -398,6 +398,15 @@ internal static class PdfiumNative
     [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
     public static extern int FPDFText_GetText(IntPtr textPage, int startIndex, int count, [Out] byte[] buffer);
 
+    // ---- fpdf_text.h : hit-testing a screen point to a character, for text selection ------
+    // Read-only, like the find API below - maps a point in PDF point space to the character
+    // index nearest it (within tolerance), or -1. See PdfPage.GetCharIndexAt/HitTestAndSelect,
+    // the only callers - drag-to-select on a native-text page (PdfTextSelectionOverlay).
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern int FPDFText_GetCharIndexAtPos(
+        IntPtr textPage, double x, double y, double xTolerance, double yTolerance);
+
     // ---- fpdf_text.h : find, for the search result highlight overlay ----------------------
     // Read-only and page-scoped, unlike the page-object *write* APIs (FPDFPageObj_NewTextObj
     // and friends) explored for the OCR "sandwich" - a real, unresolved rendering bug was

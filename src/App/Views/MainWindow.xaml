@@ -169,6 +169,17 @@
                                         <Image Source="{x:Bind Bitmap, Mode=OneWay}" Stretch="Fill" />
 
                                         <!--
+                                            Drag-to-select text: a transparent layer, hit-test
+                                            visible only while this page has native text
+                                            (PdfTextSelectionOverlay/PdfPageViewModel.HasNativeText) -
+                                            a scanned page's clicks pass straight through it. Sits
+                                            below the field overlays below so a field still gets
+                                            its own clicks first.
+                                        -->
+                                        <local:PdfTextSelectionOverlay Page="{x:Bind}"
+                                                                        Width="{x:Bind PixelWidth, Mode=OneWay}" Height="{x:Bind PixelHeight, Mode=OneWay}" />
+
+                                        <!--
                                             In-place field editing directly on the page: one
                                             overlay per editable/checkable field, framed so its
                                             boundary is visible even before the user interacts
@@ -285,6 +296,29 @@
                                                     <Rectangle Margin="{x:Bind Margin}" Width="{x:Bind Width}" Height="{x:Bind Height}"
                                                                HorizontalAlignment="Left" VerticalAlignment="Top"
                                                                Fill="#802683DB" />
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+
+                                        <!--
+                                            The drag-to-select highlight itself - painted the same
+                                            way as a search highlight (PdfTextSelectionOverlay
+                                            above drives the actual drag/hit-testing), in its own
+                                            collection so a selection and a search match never
+                                            fight over the same rectangles.
+                                        -->
+                                        <ItemsControl ItemsSource="{x:Bind Selection}" IsTabStop="False" IsHitTestVisible="False"
+                                                      Width="{x:Bind PixelWidth, Mode=OneWay}" Height="{x:Bind PixelHeight, Mode=OneWay}">
+                                            <ItemsControl.ItemsPanel>
+                                                <ItemsPanelTemplate>
+                                                    <Grid />
+                                                </ItemsPanelTemplate>
+                                            </ItemsControl.ItemsPanel>
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate x:DataType="vm:PdfSearchHighlightViewModel">
+                                                    <Rectangle Margin="{x:Bind Margin}" Width="{x:Bind Width}" Height="{x:Bind Height}"
+                                                               HorizontalAlignment="Left" VerticalAlignment="Top"
+                                                               Fill="#4D2683DB" />
                                                 </DataTemplate>
                                             </ItemsControl.ItemTemplate>
                                         </ItemsControl>
