@@ -55,6 +55,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private bool _ocrServiceAttempted;
     private List<int> _searchMatchPages = new();
     private int _searchMatchPosition = -1;
+    private int _totalOccurrenceCount;
 
     public ObservableCollection<PdfPageViewModel> Pages { get; } = new();
 
@@ -76,6 +77,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             field.OverlayVisibility = visibility;
         }
+
+        OnPropertyChanged(nameof(IsLeftPaneOpen));
+        OnPropertyChanged(nameof(LeftPaneWidth));
     }
 
     /// <summary>Same reasoning as <see cref="ProgressVisibility"/> - computed here rather than a converter bound from x:Bind.</summary>
@@ -846,15 +850,33 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// <summary>What the strip's <c>SplitView</c> actually shows: the user's choice, but never for a document without thumbnails.</summary>
     public bool IsThumbnailPaneOpen => IsThumbnailPanelOpen && Thumbnails is not null;
 
+    /// <summary>
+    /// Whether the left sidebar itself is open at all - it now also hosts Cerca and Compila
+    /// modulo (see MainWindow.xaml), so it opens on request for any of the three, not just
+    /// thumbnails. Which of them actually shows is still each one's own Visibility - when more
+    /// than one is open at once they overlay each other inside the same pane (Compila modulo on
+    /// top of Cerca on top delle miniature, by declaration order in the XAML).
+    /// </summary>
+    public bool IsLeftPaneOpen => IsThumbnailPaneOpen || IsSearchOpen || IsFormPanelOpen;
+
+    /// <summary>
+    /// Compila modulo needs more room for its field list than thumbnails/Cerca do - widening
+    /// only while it is the active reason the pane is open, rather than picking one fixed width
+    /// that is cramped for one of the three uses.
+    /// </summary>
+    public double LeftPaneWidth => IsFormPanelOpen ? 340 : 230;
+
     partial void OnThumbnailsChanged(PdfThumbnailSet? value)
     {
         OnPropertyChanged(nameof(ThumbnailButtonVisibility));
         OnPropertyChanged(nameof(IsThumbnailPaneOpen));
+        OnPropertyChanged(nameof(IsLeftPaneOpen));
     }
 
     partial void OnIsThumbnailPanelOpenChanged(bool value)
     {
         OnPropertyChanged(nameof(IsThumbnailPaneOpen));
+        OnPropertyChanged(nameof(IsLeftPaneOpen));
         if (_restoringSettings)
         {
             return;
@@ -1075,6 +1097,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     partial void OnIsSearchOpenChanged(bool value)
     {
+        OnPropertyChanged(nameof(IsLeftPaneOpen));
         if (!value)
         {
             // The bar is hidden; drop the "you are here" pointer - by the time it is reopened
@@ -1146,11 +1169,32 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 .OrderBy(index => index)
                 .ToList();
 
+        // Page-granularity match-finding above stays as-is (see docs/ARCHITECTURE.md "Ricerca
+        // testo e OCR" for why), but the status text also wants an actual occurrence count - a
+        // plain substring count against each matching page's already-indexed text (native or
+        // OCR, _pageText holds both the same way) rather than anything per-page-granularity.
+        _totalOccurrenceCount = string.IsNullOrWhiteSpace(query)
+            ? 0
+            : _searchMatchPages.Sum(page => CountOccurrences(_pageText[page], query));
+
         _searchMatchPosition = previousPage is { } page ? _searchMatchPages.IndexOf(page) : -1;
 
         UpdateSearchStatusText();
         NotifyFindCommands();
         RefreshCurrentPageHighlights();
+    }
+
+    private static int CountOccurrences(string text, string query)
+    {
+        var count = 0;
+        var index = 0;
+        while ((index = text.IndexOf(query, index, StringComparison.OrdinalIgnoreCase)) >= 0)
+        {
+            count++;
+            index += query.Length;
+        }
+
+        return count;
     }
 
     private void UpdateSearchStatusText()
@@ -1161,11 +1205,19 @@ public partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
-        var countText = _searchMatchPages.Count == 0
-            ? "Nessun risultato"
-            : _searchMatchPosition >= 0
-                ? $"Pagina {_searchMatchPages[_searchMatchPosition] + 1} - risultato {_searchMatchPosition + 1} di {_searchMatchPages.Count}"
-                : $"{_searchMatchPages.Count} pagine con risultati";
+        string countText;
+        if (_searchMatchPages.Count == 0)
+        {
+            countText = "Nessun risultato";
+        }
+        else
+        {
+            var occurrenceText = _totalOccurrenceCount == 1 ? "1 ricorrenza" : $"{_totalOccurrenceCount} ricorrenze";
+            var pageText = _searchMatchPages.Count == 1 ? "1 pagina" : $"{_searchMatchPages.Count} pagine";
+            countText = _searchMatchPosition >= 0
+                ? $"Pagina {_searchMatchPages[_searchMatchPosition] + 1} - risultato {_searchMatchPosition + 1} di {_searchMatchPages.Count} pagine - {occurrenceText}"
+                : $"{occurrenceText} in {pageText}";
+        }
 
         SearchStatusText = _ocrPending.Count > 0
             ? $"{countText} (riconoscimento testo in corso: {_ocrPending.Count} pagine rimanenti)"

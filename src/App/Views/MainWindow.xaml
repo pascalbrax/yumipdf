@@ -43,110 +43,140 @@
         </CommandBar>
 
         <!--
-            Left: the page-thumbnail strip (a vertical "Cover Flow"), collapsible. Only ever open
-            for a document with 3+ pages that has finished loading - see MainViewModel.IsThumbnailPaneOpen.
+            Left sidebar: ospita le miniature (Cover Flow verticale), Cerca e Compila modulo -
+            condividono lo stesso pannello e si sovrappongono quando più di uno è attivo insieme
+            (MainViewModel.IsLeftPaneOpen/LeftPaneWidth), invece di spartirsi lo spazio su due
+            lati o spingersi a vicenda. Si apre su richiesta per uno qualsiasi dei tre; le
+            miniature restano comunque disponibili solo per documenti di 3+ pagine già caricati
+            (MainViewModel.IsThumbnailPaneOpen).
         -->
-        <SplitView Grid.Row="1" x:Name="ThumbnailSplitView" IsPaneOpen="{x:Bind ViewModel.IsThumbnailPaneOpen, Mode=OneWay}"
-                   PanePlacement="Left" DisplayMode="Inline" OpenPaneLength="230">
+        <SplitView Grid.Row="1" x:Name="ThumbnailSplitView" IsPaneOpen="{x:Bind ViewModel.IsLeftPaneOpen, Mode=OneWay}"
+                   PanePlacement="Left" DisplayMode="Inline" OpenPaneLength="{x:Bind ViewModel.LeftPaneWidth, Mode=OneWay}">
 
             <SplitView.Pane>
-                <local:CoverFlowStrip x:Name="ThumbnailStrip" />
-            </SplitView.Pane>
+                <Grid Background="{ThemeResource LayerFillColorDefaultBrush}">
 
-            <SplitView.Content>
-                <Grid>
-
-        <SplitView IsPaneOpen="{x:Bind ViewModel.IsFormPanelOpen, Mode=TwoWay}"
-                   PanePlacement="Right" DisplayMode="Inline" OpenPaneLength="340">
-
-            <SplitView.Pane>
-                <Grid RowDefinitions="Auto,*,Auto" Background="{ThemeResource LayerFillColorDefaultBrush}">
-
-                    <StackPanel Grid.Row="0" Orientation="Horizontal" Padding="16,12" Spacing="8">
-                        <TextBlock Text="Compila modulo" Style="{StaticResource SubtitleTextBlockStyle}" />
-                    </StackPanel>
+                    <local:CoverFlowStrip x:Name="ThumbnailStrip" Visibility="{x:Bind ViewModel.IsThumbnailPaneOpen, Mode=OneWay}" />
 
                     <!--
-                        One editable control per AcroForm field - see FormFieldEntryViewModel.
-                        Only Text and CheckBox/RadioButton fields can actually be written
-                        (PdfFormFiller.SetFieldValue/SetChecked); combo/list boxes, buttons and
-                        signatures are shown read-only for now (docs/ROADMAP.md M2).
+                        Cerca: fascia in alto, sovrapposta alle miniature se entrambe attive -
+                        stesso sfondo/bordo che aveva sopra l'area pagine, ma in verticale: qui
+                        la barra è molto più stretta di quanto non fosse sopra il documento.
                     -->
-                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
-                        <ItemsControl ItemsSource="{x:Bind ViewModel.FormFields}" Padding="16,0,16,16">
-                            <ItemsControl.ItemsPanel>
-                                <ItemsPanelTemplate>
-                                    <StackPanel Orientation="Vertical" Spacing="12" />
-                                </ItemsPanelTemplate>
-                            </ItemsControl.ItemsPanel>
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate x:DataType="vm:FormFieldEntryViewModel">
-                                    <StackPanel Orientation="Vertical" Spacing="4">
+                    <Border x:Name="SearchBar" VerticalAlignment="Top" HorizontalAlignment="Stretch"
+                            Background="{ThemeResource LayerFillColorDefaultBrush}"
+                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="0,0,0,1"
+                            Padding="12,8" Visibility="{x:Bind ViewModel.IsSearchOpen, Mode=OneWay}">
+                        <StackPanel Spacing="8">
+                            <TextBox x:Name="SearchBox" PlaceholderText="Cerca nel testo del documento..."
+                                     Text="{x:Bind ViewModel.SearchQuery, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                     KeyDown="OnSearchBoxKeyDown" />
+                            <TextBlock Text="{x:Bind ViewModel.SearchStatusText, Mode=OneWay}" Opacity="0.75" FontSize="12" TextWrapping="Wrap" />
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <Button Content="&#x2039;" MinWidth="32" Command="{x:Bind ViewModel.FindPreviousCommand}" ToolTipService.ToolTip="Risultato precedente" />
+                                <Button Content="&#x203A;" MinWidth="32" Command="{x:Bind ViewModel.FindNextCommand}" ToolTipService.ToolTip="Risultato successivo" />
+                                <Button Content="&#x2715;" MinWidth="32" Click="OnCloseSearchClicked" ToolTipService.ToolTip="Chiudi la ricerca" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
 
-                                        <StackPanel Orientation="Vertical" Visibility="{x:Bind TextFieldVisibility}">
-                                            <TextBlock Text="{x:Bind Name}" FontSize="12" Opacity="0.7" />
-                                            <TextBox Text="{x:Bind Value, Mode=OneWay}" TextChanged="{x:Bind OnTextChanged}" LostFocus="{x:Bind CommitText}"
-                                                     AcceptsReturn="{x:Bind IsMultiline}" TextWrapping="{x:Bind OverlayTextWrapping}" />
+                    <!--
+                        Compila modulo: copre l'intero pannello quando attivo (serve più spazio
+                        di quanto lascerebbero le miniature o Cerca sotto) - sovrapposto a
+                        entrambi per lo stesso motivo.
+                    -->
+                    <Grid RowDefinitions="Auto,*,Auto" Background="{ThemeResource LayerFillColorDefaultBrush}"
+                          Visibility="{x:Bind ViewModel.IsFormPanelOpen, Mode=OneWay}">
+
+                        <StackPanel Grid.Row="0" Orientation="Horizontal" Padding="16,12" Spacing="8">
+                            <TextBlock Text="Compila modulo" Style="{StaticResource SubtitleTextBlockStyle}" />
+                        </StackPanel>
+
+                        <!--
+                            One editable control per AcroForm field - see FormFieldEntryViewModel.
+                            Only Text and CheckBox/RadioButton fields can actually be written
+                            (PdfFormFiller.SetFieldValue/SetChecked); combo/list boxes, buttons and
+                            signatures are shown read-only for now (docs/ROADMAP.md M2).
+                        -->
+                        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                            <ItemsControl ItemsSource="{x:Bind ViewModel.FormFields}" Padding="16,0,16,16">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <StackPanel Orientation="Vertical" Spacing="12" />
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="vm:FormFieldEntryViewModel">
+                                        <StackPanel Orientation="Vertical" Spacing="4">
+
+                                            <StackPanel Orientation="Vertical" Visibility="{x:Bind TextFieldVisibility}">
+                                                <TextBlock Text="{x:Bind Name}" FontSize="12" Opacity="0.7" />
+                                                <TextBox Text="{x:Bind Value, Mode=OneWay}" TextChanged="{x:Bind OnTextChanged}" LostFocus="{x:Bind CommitText}"
+                                                         AcceptsReturn="{x:Bind IsMultiline}" TextWrapping="{x:Bind OverlayTextWrapping}" />
+                                            </StackPanel>
+
+                                            <CheckBox Visibility="{x:Bind CheckBoxFieldVisibility}" Content="{x:Bind Name}"
+                                                      IsChecked="{x:Bind IsChecked, Mode=OneWay}"
+                                                      Checked="{x:Bind OnCheckedChanged}" Unchecked="{x:Bind OnCheckedChanged}" />
+
+                                            <!--
+                                                A native RadioButton (not CheckBox): it already reads
+                                                as "exactly one of these" both visually (a round dot,
+                                                not a checkmark in a square) and behaviorally -
+                                                GroupName ties every widget sharing this field's PDF
+                                                /T name into one WinUI-level exclusive group too,
+                                                on top of PdfFormFiller's own radio-group handling.
+                                            -->
+                                            <RadioButton Visibility="{x:Bind RadioButtonFieldVisibility}" Content="{x:Bind Name}"
+                                                         GroupName="{x:Bind Name}"
+                                                         IsChecked="{x:Bind IsChecked, Mode=OneWay}"
+                                                         Checked="{x:Bind OnCheckedChanged}" Unchecked="{x:Bind OnCheckedChanged}" />
+
+                                            <StackPanel Orientation="Vertical" Visibility="{x:Bind ComboBoxFieldVisibility}">
+                                                <TextBlock Text="{x:Bind Name}" FontSize="12" Opacity="0.7" />
+                                                <ComboBox ItemsSource="{x:Bind Options}" SelectedIndex="{x:Bind SelectedOptionIndex, Mode=TwoWay}"
+                                                          PlaceholderText="(nessuna selezione)" HorizontalAlignment="Stretch" />
+                                            </StackPanel>
+
+                                            <StackPanel Orientation="Vertical" Visibility="{x:Bind ListBoxFieldVisibility}">
+                                                <TextBlock Text="{x:Bind Name}" FontSize="12" Opacity="0.7" />
+                                                <ListView ItemsSource="{x:Bind Options}" SelectedIndex="{x:Bind SelectedOptionIndex, Mode=TwoWay}"
+                                                          SelectionMode="Single" MaxHeight="160" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" />
+                                            </StackPanel>
+
+                                            <Button Visibility="{x:Bind ButtonFieldVisibility}" Content="{x:Bind Name}"
+                                                    Click="{x:Bind OnButtonClicked}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+
+                                            <StackPanel Orientation="Vertical" Visibility="{x:Bind ReadOnlyFieldVisibility}">
+                                                <TextBlock FontSize="12" Opacity="0.7">
+                                                    <Run Text="{x:Bind Name}" />
+                                                    <Run Text=" - " />
+                                                    <Run Text="{x:Bind TypeLabel}" />
+                                                </TextBlock>
+                                                <TextBox Text="{x:Bind Value}" IsEnabled="False" />
+                                            </StackPanel>
+
                                         </StackPanel>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
 
-                                        <CheckBox Visibility="{x:Bind CheckBoxFieldVisibility}" Content="{x:Bind Name}"
-                                                  IsChecked="{x:Bind IsChecked, Mode=OneWay}"
-                                                  Checked="{x:Bind OnCheckedChanged}" Unchecked="{x:Bind OnCheckedChanged}" />
+                        <StackPanel Grid.Row="2" Orientation="Vertical" Spacing="8" Padding="16">
+                            <CheckBox Content="Unisci prima di salvare" IsChecked="{x:Bind ViewModel.FlattenBeforeSave, Mode=TwoWay}" />
+                            <TextBlock TextWrapping="Wrap" FontSize="11" Opacity="0.7"
+                                       Text="Unisce i valori compilati al contenuto della pagina: diventano definitivi e non sarà più possibile modificarli in questa sessione. Il file originale non viene mai sovrascritto." />
+                            <Button Content="Salva con nome..." HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Click="OnSaveFilledFormClicked" />
+                        </StackPanel>
 
-                                        <!--
-                                            A native RadioButton (not CheckBox): it already reads
-                                            as "exactly one of these" both visually (a round dot,
-                                            not a checkmark in a square) and behaviorally -
-                                            GroupName ties every widget sharing this field's PDF
-                                            /T name into one WinUI-level exclusive group too,
-                                            on top of PdfFormFiller's own radio-group handling.
-                                        -->
-                                        <RadioButton Visibility="{x:Bind RadioButtonFieldVisibility}" Content="{x:Bind Name}"
-                                                     GroupName="{x:Bind Name}"
-                                                     IsChecked="{x:Bind IsChecked, Mode=OneWay}"
-                                                     Checked="{x:Bind OnCheckedChanged}" Unchecked="{x:Bind OnCheckedChanged}" />
-
-                                        <StackPanel Orientation="Vertical" Visibility="{x:Bind ComboBoxFieldVisibility}">
-                                            <TextBlock Text="{x:Bind Name}" FontSize="12" Opacity="0.7" />
-                                            <ComboBox ItemsSource="{x:Bind Options}" SelectedIndex="{x:Bind SelectedOptionIndex, Mode=TwoWay}"
-                                                      PlaceholderText="(nessuna selezione)" HorizontalAlignment="Stretch" />
-                                        </StackPanel>
-
-                                        <StackPanel Orientation="Vertical" Visibility="{x:Bind ListBoxFieldVisibility}">
-                                            <TextBlock Text="{x:Bind Name}" FontSize="12" Opacity="0.7" />
-                                            <ListView ItemsSource="{x:Bind Options}" SelectedIndex="{x:Bind SelectedOptionIndex, Mode=TwoWay}"
-                                                      SelectionMode="Single" MaxHeight="160" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" />
-                                        </StackPanel>
-
-                                        <Button Visibility="{x:Bind ButtonFieldVisibility}" Content="{x:Bind Name}"
-                                                Click="{x:Bind OnButtonClicked}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
-
-                                        <StackPanel Orientation="Vertical" Visibility="{x:Bind ReadOnlyFieldVisibility}">
-                                            <TextBlock FontSize="12" Opacity="0.7">
-                                                <Run Text="{x:Bind Name}" />
-                                                <Run Text=" - " />
-                                                <Run Text="{x:Bind TypeLabel}" />
-                                            </TextBlock>
-                                            <TextBox Text="{x:Bind Value}" IsEnabled="False" />
-                                        </StackPanel>
-
-                                    </StackPanel>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                    </ScrollViewer>
-
-                    <StackPanel Grid.Row="2" Orientation="Vertical" Spacing="8" Padding="16">
-                        <CheckBox Content="Unisci prima di salvare" IsChecked="{x:Bind ViewModel.FlattenBeforeSave, Mode=TwoWay}" />
-                        <TextBlock TextWrapping="Wrap" FontSize="11" Opacity="0.7"
-                                   Text="Unisce i valori compilati al contenuto della pagina: diventano definitivi e non sarà più possibile modificarli in questa sessione. Il file originale non viene mai sovrascritto." />
-                        <Button Content="Salva con nome..." HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Click="OnSaveFilledFormClicked" />
-                    </StackPanel>
+                    </Grid>
 
                 </Grid>
             </SplitView.Pane>
 
             <SplitView.Content>
+                <Grid>
+
                 <ScrollViewer x:Name="PagesScrollViewer"
                               HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"
                               ZoomMode="Disabled" HorizontalScrollMode="Auto" VerticalScrollMode="Auto"
@@ -330,9 +360,6 @@
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
                 </ScrollViewer>
-            </SplitView.Content>
-
-        </SplitView>
 
                     <!-- Handle on the strip's edge: the same open/close as the toolbar button. -->
                     <Button x:Name="ThumbnailHandle" HorizontalAlignment="Left" VerticalAlignment="Center"
@@ -343,30 +370,6 @@
                             ToolTipService.ToolTip="Miniature">
                         <FontIcon x:Name="ThumbnailHandleGlyph" Glyph="&#xE76C;" FontSize="10" />
                     </Button>
-
-                    <!--
-                        Find bar: overlays the top of the page area (browser-style), never
-                        pushed into the layout as its own row so opening/closing it does not
-                        reflow anything else. Search runs page-by-page against text PdfEngine
-                        already extracted natively, or - for a scanned page with none - an OCR
-                        pass that only starts once the whole document has finished its first
-                        render (MainViewModel.BeginTextIndexing/RunOcrLoopAsync).
-                    -->
-                    <Border x:Name="SearchBar" HorizontalAlignment="Stretch" VerticalAlignment="Top"
-                            Background="{ThemeResource LayerFillColorDefaultBrush}"
-                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="0,0,0,1"
-                            Padding="12,8" Visibility="{x:Bind ViewModel.IsSearchOpen, Mode=OneWay}">
-                        <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                            <TextBox x:Name="SearchBox" Width="280" PlaceholderText="Cerca nel testo del documento..."
-                                     Text="{x:Bind ViewModel.SearchQuery, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                     KeyDown="OnSearchBoxKeyDown" />
-                            <TextBlock Text="{x:Bind ViewModel.SearchStatusText, Mode=OneWay}" VerticalAlignment="Center"
-                                       MinWidth="140" Opacity="0.75" TextWrapping="Wrap" />
-                            <Button Content="&#x2039;" MinWidth="32" Command="{x:Bind ViewModel.FindPreviousCommand}" ToolTipService.ToolTip="Risultato precedente" />
-                            <Button Content="&#x203A;" MinWidth="32" Command="{x:Bind ViewModel.FindNextCommand}" ToolTipService.ToolTip="Risultato successivo" />
-                            <Button Content="&#x2715;" MinWidth="32" Click="OnCloseSearchClicked" ToolTipService.ToolTip="Chiudi la ricerca" />
-                        </StackPanel>
-                    </Border>
 
                 </Grid>
             </SplitView.Content>

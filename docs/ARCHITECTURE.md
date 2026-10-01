@@ -257,21 +257,25 @@ azzererebbe tutti gli altri.
 
 ## Ricerca testo e OCR
 
-La ricerca (barra a scomparsa in cima all'area pagine, `Icon="Find"`, Ctrl+F - all'apertura il focus
-tastiera va nella casella, con un rinvio di un ciclo del dispatcher perché la barra deve prima passare
-da `Collapsed` a `Visible` ed essere disposta prima che `Focus()` funzioni) è **per pagina, non per
-occorrenza**: trova quali pagine contengono la parola cercata (confronto senza distinzione di
-maiuscole/minuscole, `string.Contains(..., OrdinalIgnoreCase)`) e ci salta. Ogni occorrenza sulla pagina
-attiva viene evidenziata (rettangolo semitrasparente, `PdfPageViewModel.Highlights`) - un overlay
+La ricerca (barra nella barra laterale sinistra - si veda "Barra laterale sinistra" più sotto per dove
+e perché - `Icon="Find"`, Ctrl+F - all'apertura il focus tastiera va nella casella, con un rinvio di un
+ciclo del dispatcher perché la barra deve prima passare da `Collapsed` a `Visible` ed essere disposta
+prima che `Focus()` funzioni) **naviga per pagina, non per occorrenza**: trova quali pagine contengono
+la parola cercata (confronto senza distinzione di maiuscole/minuscole, `string.Contains(...,
+OrdinalIgnoreCase)`) e ci salta una pagina alla volta (Precedente/Successivo). Ogni occorrenza sulla
+pagina attiva viene evidenziata (rettangolo semitrasparente, `PdfPageViewModel.Highlights`) - un overlay
 esclusivamente a schermo, mai scritto nel PDF: per il testo nativo usa l'API di ricerca di PDFium
 (`FPDFText_FindStart/FindNext` + `FPDFText_CountRects/GetRect`, in sola lettura, indipendente dalle API di
 scrittura del "sandwich" più sotto), per una pagina OCR confronta il testo di ogni singola parola
 riconosciuta con la query - un limite reale: una query di più parole divisa tra due parole OCR non
-verrebbe evidenziata (la pagina risulta comunque trovata, tramite il testo unito). Niente conta le
-occorrenze all'interno della pagina. Scelta deliberata, non un taglio per fretta: la
-richiesta esplicita era "la priorità è la ricerca di parole chiave testuali", e la sessione di verifica
-precedente aveva trovato un bug reale, mai isolato, nel posizionare per-parola un livello di testo
-(si vedano i commit precedenti a questo per la cronaca completa) - niente di quel meccanismo entra qui.
+verrebbe evidenziata (la pagina risulta comunque trovata, tramite il testo unito). La barra di stato
+mostra anche il numero totale di ricorrenze (`MainViewModel.CountOccurrences`, un conteggio di substring
+case-insensitive sul testo già indicizzato di ogni pagina trovata - `_pageText`, nativo o OCR che sia) -
+un conteggio aggiuntivo mostrato all'utente, non usato per la navigazione: Precedente/Successivo restano
+a livello di pagina, come sopra. Scelta deliberata, non un taglio per fretta: la richiesta esplicita era
+"la priorità è la ricerca di parole chiave testuali", e la sessione di verifica precedente aveva trovato
+un bug reale, mai isolato, nel posizionare per-parola un livello di testo (si vedano i commit precedenti
+a questo per la cronaca completa) - niente di quel meccanismo entra qui.
 
 **Dove il testo di ogni pagina viene letto** (`PdfPage.HasExtractableText`/`ExtractText`, in `PdfEngine`,
 nessuna dipendenza da un form-fill environment): `FPDFText_LoadPage` + `FPDFText_CountChars` per sapere se
@@ -316,6 +320,34 @@ verificato dal vivo: la scorciatoia Ctrl+F in sé (il tentativo di invio tasti s
 dal controllo di sicurezza "la finestra in primo piano non è PDF26" prima di inviare nulla) - il
 meccanismo (`KeyboardAccelerator` dichiarativo su `SearchToggle`) è lo stesso schema standard già usato
 altrove in WinUI3, non testato live in questa sessione.
+
+## Barra laterale sinistra: Cerca, Compila modulo e Miniature condividono lo stesso pannello
+
+Le tre funzioni vivevano prima in tre posti diversi (Cerca: fascia sopra l'area pagine; Compila modulo:
+pannello a destra; Miniature: pannello a sinistra) - ora condividono lo stesso `SplitView.Pane` a
+sinistra (`MainWindow.xaml`, `ThumbnailSplitView`), sovrapposte quando più di una è attiva insieme
+invece di spartirsi lo spazio su lati diversi o spingersi a vicenda, su richiesta esplicita dell'utente.
+
+**Apertura** (`MainViewModel.IsLeftPaneOpen`, bindato a `SplitView.IsPaneOpen`): `IsThumbnailPaneOpen ||
+IsSearchOpen || IsFormPanelOpen` - il pannello si apre per uno qualsiasi dei tre, mai da solo. Resta
+nascosto per impostazione predefinita, come già accadeva per le miniature: un documento appena aperto non
+mostra nulla a sinistra finché l'utente non attiva uno dei tre (scelta esplicita - vedi la discussione in
+sessione: i pulsanti Precedente/Successivo per cambiare **pagina** restano nella barra in alto, sempre
+visibili; quelli spostati a sinistra sono solo Precedente/Successivo **risultato di ricerca**).
+
+**Z-order** (`SplitView.Pane`, un `Grid` senza righe/colonne - stesso pattern già usato altrove in questo
+file per sovrapporre overlay, es. i rettangoli di evidenziazione sopra il bitmap di pagina): dal basso
+verso l'alto, `CoverFlowStrip` (visibile solo se `IsThumbnailPaneOpen`) → barra di ricerca (visibile solo
+se `IsSearchOpen`, ora in verticale - casella, stato, Precedente/Successivo/Chiudi uno sotto l'altro,
+non più su una riga sola: la barra laterale è molto più stretta di quanto non fosse l'area pagine sopra
+cui si sovrapponeva prima) → pannello "Compila modulo" (visibile solo se `IsFormPanelOpen`, copre l'intero
+pannello perché richiede più spazio delle miniature o di Cerca sotto). Quando più di uno è attivo insieme,
+quello dichiarato dopo nel XAML copre quello prima - non ci sono regole di esclusione reciproca: aprire
+Cerca non chiude Compila modulo, e viceversa.
+
+**Larghezza** (`MainViewModel.LeftPaneWidth`, bindato a `SplitView.OpenPaneLength`): 340px quando Compila
+modulo è la ragione per cui il pannello è aperto (l'elenco dei campi ha bisogno di più spazio), 230px
+altrimenti (miniature/Cerca) - calcolata, non un singolo valore fisso scomodo per uno dei tre usi.
 
 ## Selezione del testo (drag-to-select) - solo pagine con testo nativo
 
