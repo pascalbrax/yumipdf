@@ -50,4 +50,32 @@
     <Manifest Include="$(ApplicationManifest)" />
   </ItemGroup>
 
+  <!--
+      dotnet publish (unlike dotnet build) does not copy the XAML compiler's own generated
+      output - $(AssemblyName).pri (the resource index) and every page's .xbf (App.xbf at the
+      root, one per Views/*.xaml) - into the publish folder, even though they sit right there in
+      $(OutDir) by the time Publish runs (Publish depends on Build). A published app silently
+      missing them crashes on startup inside Microsoft.UI.Xaml.dll itself (confirmed live:
+      0xc000027b, Event Viewer "Application Error" naming Microsoft.UI.Xaml.dll as the faulting
+      module) - the XAML runtime has nothing to load its own Window/pages from. Hooking
+      ComputeFilesToPublish (the extensibility point dotnet publish itself uses to decide what
+      to copy) to add them explicitly is the standard fix for this gap in unpackaged WinUI3/
+      Windows App SDK publishing; RecursiveDir on the .xbf glob keeps Views/*.xbf under their own
+      subfolder in the publish output, matching where the app actually looks for them.
+  -->
+  <Target Name="IncludeXamlCompilerOutputInPublish" BeforeTargets="ComputeFilesToPublish">
+    <ItemGroup>
+      <_GeneratedXbf Include="$(OutDir)**\*.xbf" />
+      <_GeneratedPri Include="$(OutDir)$(AssemblyName).pri" />
+      <ResolvedFileToPublish Include="@(_GeneratedXbf)">
+        <RelativePath>%(_GeneratedXbf.RecursiveDir)%(_GeneratedXbf.Filename)%(_GeneratedXbf.Extension)</RelativePath>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      </ResolvedFileToPublish>
+      <ResolvedFileToPublish Include="@(_GeneratedPri)">
+        <RelativePath>%(_GeneratedPri.Filename)%(_GeneratedPri.Extension)</RelativePath>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      </ResolvedFileToPublish>
+    </ItemGroup>
+  </Target>
+
 </Project>
