@@ -99,10 +99,11 @@
                             signatures are shown read-only for now (docs/ROADMAP.md M2).
                         -->
                         <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
-                            <ItemsControl ItemsSource="{x:Bind ViewModel.FormFields}" Padding="16,0,16,16">
+                            <ItemsControl ItemsSource="{x:Bind ViewModel.FormFields}">
                                 <ItemsControl.ItemsPanel>
                                     <ItemsPanelTemplate>
-                                        <StackPanel Orientation="Vertical" Spacing="12" />
+                                        <!-- Side gutter: a Margin on the panel itself, so the fields never sit flush against the pane's edges. -->
+                                        <StackPanel Orientation="Vertical" Spacing="12" Margin="20,0,20,16" />
                                     </ItemsPanelTemplate>
                                 </ItemsControl.ItemsPanel>
                                 <ItemsControl.ItemTemplate>
