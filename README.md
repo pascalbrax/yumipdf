@@ -19,6 +19,8 @@ Visualizzatore, editor e compilatore di moduli PDF nativo per Windows 10 e 11.
 - Stampa (dialogo nativo, intervallo pagine)
 - Selezione del testo per trascinamento (solo pagine con testo nativo), con copia automatica negli appunti
 - Finestra "Informazioni" (versione, licenze di terze parti)
+- Indicazione nella barra di stato se il documento aperto si autodichiara PDF/A (letta dai suoi
+  metadati XMP - non una validazione completa, vedi [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md))
 
 Combo box/list box modificabili, la ricerca testo, la navigazione da miniature/indice, le annotazioni
 avanzate (nota, disegno libero, timbro) e l'installer sono pianificati nelle milestone successive - vedi

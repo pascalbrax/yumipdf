@@ -94,6 +94,15 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     public partial string? DocumentTitle { get; set; }
 
+    /// <summary>
+    /// "PDF/A-2B" (etc.) once <see cref="OpenAsync"/> has scanned the file's own XMP self-
+    /// declaration (<see cref="PdfEngine.PdfAConformance.Detect"/>), "Non PDF/A" once the scan
+    /// found no such declaration, null only before any document has been opened. Not a
+    /// validator - see PdfAConformance's own remarks.
+    /// </summary>
+    [ObservableProperty]
+    public partial string? PdfAStatusText { get; set; }
+
     /// <summary>Shown in the status bar in an error color - reserve for actual failures, not confirmations (see <see cref="InfoMessage"/>).</summary>
     [ObservableProperty]
     public partial string? StatusMessage { get; set; }
@@ -238,6 +247,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             _document = document;
 
             DocumentTitle = Path.GetFileName(localPath);
+            PdfAStatusText = DetectPdfAConformance(localPath);
             PageCount = _document.PageCount;
             CurrentPageIndex = 0;
             IsFitWidthActive = false;
@@ -263,6 +273,27 @@ public partial class MainViewModel : ObservableObject, IDisposable
         finally
         {
             IsBusy = false;
+        }
+    }
+
+    /// <summary>
+    /// "PDF/A" on the status bar always means "this file's own XMP metadata claims to be", never
+    /// an independently verified result - see <see cref="PdfAConformance"/>'s remarks for why a
+    /// real validator is out of scope here. A read failure (locked file, odd permissions - the
+    /// document itself already opened fine through PDFium by this point, so this would be an
+    /// unrelated, secondary problem) just leaves the status text blank rather than failing the
+    /// whole open.
+    /// </summary>
+    private static string? DetectPdfAConformance(string localPath)
+    {
+        try
+        {
+            var bytes = File.ReadAllBytes(localPath);
+            return PdfAConformance.Detect(bytes) ?? "Non PDF/A";
+        }
+        catch (Exception)
+        {
+            return null;
         }
     }
 

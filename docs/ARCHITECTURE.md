@@ -429,6 +429,43 @@ separata, e una `ContentDialog` vive già dentro `MainWindow`, coerente con la n
 legge `ProductVersion` via `FileVersionInfo.GetVersionInfo` (non `Assembly.GetName().Version`, che
 riporta solo `AssemblyVersion`, sempre a 4 cifre tipo `0.1.0.0`) e mostra solo la parte prima del `+`.
 
+## Indicazione PDF/A nella barra di stato: autodichiarazione, non validazione
+
+Alla riapertura di un documento la barra di stato mostra "PDF/A-2B" (o qualunque livello
+dichiarato) oppure "Non PDF/A" accanto al nome del file (`MainViewModel.PdfAStatusText`,
+calcolato in `OpenAsync` da `DetectPdfAConformance`). **Non è un validatore**: legge solo
+l'autodichiarazione che il file stesso porta nei propri metadati XMP (`pdfaid:part`/
+`pdfaid:conformance`, ISO 19005 Annex D) - esattamente quello che mostrano anche Adobe Acrobat,
+Foxit e la maggior parte dei lettori PDF mainstream. Una vera validazione PDF/A (verificare font
+incorporati, spazi colore, trasparenza, crittografia e decine di altre regole strutturali contro
+il livello dichiarato) è un progetto a parte - è il motivo per cui esistono strumenti dedicati
+come veraPDF; non è in scope qui.
+
+**Perché sui byte grezzi del file, non su PDFium** (`PdfEngine.PdfAConformance.Detect`): l'API
+pubblica di PDFium non espone in alcun modo il contenuto dello stream `/Metadata` del documento -
+verificato contro gli header vendored (`FPDF_GetMetaText` legge solo il dizionario Info classico:
+Title/Author/Subject/.../Producer, non l'XMP). La ricerca avviene quindi sui byte del file così
+come arriva (`MainViewModel.DetectPdfAConformance` rilegge il file dal percorso locale già
+risolto da `OpenAsync`): prima una ricerca a livello di byte del marcatore del namespace XMP
+PDF/A (`www.aiim.org/pdfa/ns/id/`, stabile per tutte le parti 1/2/3) - non una conversione in
+stringa dell'intero file, che per un PDF grande vorrebbe dire allocarne una seconda copia solo per
+cercare un marcatore che quasi sempre sta vicino alla fine (lo stream dei metadati è tipicamente
+uno degli ultimi oggetti scritti) - poi, solo sulla piccola finestra di byte attorno al marcatore
+trovato, la decodifica in testo (Latin-1: ogni byte mappa esattamente un carattere, non lancia mai
+eccezioni indipendentemente da cosa circondi il packet XMP) e l'estrazione di `pdfaid:part`/
+`pdfaid:conformance` via regex, sia in forma attributo che elemento figlio.
+
+**Limiti noti, non un bug**: non trova nulla se lo stream `/Metadata` è compresso (legale ma
+inusuale - la maggior parte dei produttori PDF/A lo lascia non compresso apposta, per essere
+trovabile così da strumenti esterni) o se usa un prefisso di namespace diverso dal convenzionale
+`pdfaid`. In entrambi i casi il risultato è "Non PDF/A" anche per un documento che in realtà lo è -
+un falso negativo accettabile per un'indicazione informativa, non per un validatore.
+
+**Verificato**: due file PDF minimi creati a mano (uno con la dichiarazione PDF/A-2B nei metadati
+XMP, uno senza) apribili correttamente da PDFium tramite `PdfDocument.OpenFromPath` e corretti
+entrambi via `PdfAConformance.Detect` (vedi `tests/PdfEngine.Tests/PdfAConformanceTests.cs` per i
+casi sulla sola logica di estrazione, in forma attributo e in forma elemento).
+
 ## Nota sul nome dell'assembly
 
 L'app si chiama **PDF26** (non 26PDF): il generatore di sorgenti CsWinRT (usato da WinUI3/Windows App SDK

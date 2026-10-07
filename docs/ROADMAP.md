@@ -24,6 +24,7 @@
 - [ ] Virtualizzazione reale del viewport (oggi ogni pagina viene comunque renderizzata e tenuta in memoria, solo in modo progressivo/asincrono - per documenti molto grandi serebbe da scaricare/saltare le pagine lontane dallo scroll corrente)
 - [x] Versionamento (`Directory.Build.props`, un solo `<Version>` per tutti i progetti) e finestra "Informazioni" (`AboutDialog`: versione, breve descrizione, licenze di terze parti)
 - [x] Cerca e Compila modulo spostati nella barra laterale sinistra, condivisa con le miniature (sovrapposti quando più di uno è attivo insieme) - Precedente/Successivo **pagina** restano nella barra in alto, solo Precedente/Successivo **risultato di ricerca** si sono spostati; la barra di stato della ricerca mostra ora anche il numero totale di ricorrenze, non solo le pagine - vedi docs/ARCHITECTURE.md "Barra laterale sinistra"
+- [x] Indicazione PDF/A nella barra di stato ("PDF/A-2B"/"Non PDF/A") - autodichiarazione letta dai metadati XMP del file (`PdfEngine.PdfAConformance`), non una validazione completa - vedi docs/ARCHITECTURE.md "Indicazione PDF/A nella barra di stato"
 
 ## M2 - Compilazione moduli (scrittura)
 - [x] Verificato il layout di `FPDF_FORMFILLINFO` contro l'header reale scaricato dalla release GitHub di `bblanchon/pdfium-binaries` corrispondente alla versione NuGet in uso - trovati e corretti due bug (campo `xfa_disabled` mancante, `FORM_ReplaceSelection` dichiarata con reso sbagliato). Vedi docs/ARCHITECTURE.md "AcroForm filling".
