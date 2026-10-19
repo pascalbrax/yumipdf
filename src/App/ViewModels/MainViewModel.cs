@@ -9,6 +9,7 @@ using Microsoft.UI.Xaml.Media.Imaging;
 using Windows.UI;
 using Pdf26.Services;
 using PdfEngine;
+using PdfEngine.Annotations;
 using PdfEngine.Forms;
 
 namespace Pdf26.ViewModels;
@@ -72,6 +73,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// </summary>
     partial void OnIsFormPanelOpenChanged(bool value)
     {
+        if (value)
+        {
+            CloseOtherPanels(SidebarPanel.Form);
+        }
+
         var visibility = value ? Visibility.Visible : Visibility.Collapsed;
         foreach (var field in FormFields)
         {
@@ -96,9 +102,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     /// <summary>
     /// "PDF/A-2B" (etc.) once <see cref="OpenAsync"/> has scanned the file's own XMP self-
-    /// declaration (<see cref="PdfEngine.PdfAConformance.Detect"/>), "Non PDF/A" once the scan
-    /// found no such declaration, null only before any document has been opened. Not a
-    /// validator - see PdfAConformance's own remarks.
+    /// declaration (<see cref="PdfEngine.PdfAConformance.Detect"/>); null when the file makes no
+    /// such declaration (nothing is shown for an ordinary PDF - not being PDF/A is not news) and
+    /// before any document has been opened. Not a validator - see PdfAConformance's own remarks.
     /// </summary>
     [ObservableProperty]
     public partial string? PdfAStatusText { get; set; }
@@ -157,6 +163,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         IsThumbnailPanelOpen = _settings.ThumbnailPanelOpen;
         IsBookmarkPanelOpen = _settings.BookmarkPanelOpen;
         _restoringSettings = false;
+        RefreshRecentEntries();
     }
 
     public void UpdateBackgroundColor(Color color)
@@ -246,6 +253,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
             _document?.Dispose();
             _document = document;
+            ResetAnnotationState();
 
             Bookmarks = LoadBookmarks(document);
 
@@ -269,11 +277,18 @@ public partial class MainViewModel : ObservableObject, IDisposable
             BeginThumbnails(document);
             BeginTextIndexing(document);
             StatusMessage = null;
+            RegisterRecent(source);
             return OpenOutcome.Success;
         }
         catch (Exception ex)
         {
             StatusMessage = $"Errore nell'apertura del documento: {ex.Message}";
+            if (ex is FileSourceResolutionException && ex.Message.StartsWith("File non trovato", StringComparison.Ordinal))
+            {
+                // A recent entry whose file is gone would fail the same way every time: drop it.
+                RemoveRecent(source.Value);
+            }
+
             return OpenOutcome.Failed;
         }
         finally
@@ -302,7 +317,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             return (null, null);
         }
 
-        var pdfa = PdfAConformance.Detect(bytes) ?? "Non PDF/A";
+        var pdfa = PdfAConformance.Detect(bytes);
         try
         {
             var signatures = document.GetSignatures();
@@ -326,9 +341,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public partial bool IsPdfABannerOpen { get; set; }
 
     /// <summary>
-    /// <paramref name="status"/> is what <see cref="AnalyzeFile"/> found: "PDF/A-2B" (etc.), "Non
-    /// PDF/A", or null. Only an actual PDF/A claim gets a banner - "Non PDF/A" stays a quiet note
-    /// in the status bar, being no more than the absence of a claim.
+    /// <paramref name="status"/> is what <see cref="AnalyzeFile"/> found: "PDF/A-2B" (etc.), or null
+    /// when the file claims nothing. Only an actual PDF/A claim shows anything - in the status bar
+    /// and as a banner; the absence of a claim is not worth a word.
     /// </summary>
     private void ApplyPdfAStatus(string? status)
     {
@@ -702,6 +717,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
             placeholder.Bitmap = bitmap;
             MarkThumbnailDirty(pageIndex);
+            HasUnsavedChanges = true;
             ProgressPercent = 100;
         }
         catch (Exception ex)
@@ -733,6 +749,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
             return false;
         }
 
+        if (HasPendingFields)
+        {
+            // Placed form fields are written into the file now (and "Unisci" cannot apply to them).
+            return await SaveWithPendingFieldsAsync(destinationPath).ConfigureAwait(true);
+        }
+
         if (flatten)
         {
             await StopThumbnailsAsync().ConfigureAwait(true);
@@ -760,6 +782,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 document.SaveAs(destinationPath);
             });
 
+            HasUnsavedChanges = false;
             if (flatten)
             {
                 InfoMessage = "Documento unito e salvato: i valori compilati sono ora parte della pagina e i campi non sono più modificabili in questa sessione.";
@@ -780,6 +803,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
             // that had no extractable text into one that now does.
             if (flatten)
             {
+                // Flattening bakes notes and stamps into the page too: they are no longer annotations to select or move.
+                ClearAllPageAnnotations();
                 RestartThumbnails();
                 BeginTextIndexing(document);
             }
@@ -904,6 +929,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 using var page = document.GetPage(index);
                 var (widthPt, heightPt) = page.SizeInPoints;
                 var placeholder = new PdfPageViewModel(index, widthPt, heightPt, zoom, this);
+                placeholder.SetAnnotations(PdfEditableAnnotations.List(page));
 
                 // Editable/checkable fields on this page get an in-place overlay drawn on top
                 // of the page bitmap (see PdfPageViewModel.Fields) - read-only field types
@@ -1093,16 +1119,21 @@ public partial class MainViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(LeftPaneWidth));
         if (value)
         {
-            // Thumbnails and the index share the sidebar and never show together.
-            IsThumbnailPanelOpen = false;
+            CloseOtherPanels(SidebarPanel.Bookmarks);
         }
 
-        if (_restoringSettings)
+        if (_restoringSettings || _excludingPanels)
         {
+            // Closed only because another panel opened: not the user's choice, so the next start still brings it back.
             return;
         }
 
         _settings.BookmarkPanelOpen = value;
+        if (value)
+        {
+            _settings.ThumbnailPanelOpen = false;
+        }
+
         SaveSettings();
     }
 
@@ -1161,14 +1192,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// than one is open at once they overlay each other inside the same pane (Compila modulo on
     /// top of Cerca on top delle miniature, by declaration order in the XAML).
     /// </summary>
-    public bool IsLeftPaneOpen => IsThumbnailPaneOpen || IsBookmarkPaneOpen || IsSearchOpen || IsFormPanelOpen;
+    public bool IsLeftPaneOpen => IsThumbnailPaneOpen || IsBookmarkPaneOpen || IsToolsPaneOpen || IsSearchOpen || IsFormPanelOpen || IsRecentPanelOpen;
 
     /// <summary>
     /// Compila modulo needs more room for its field list than thumbnails/Cerca do - widening
     /// only while it is the active reason the pane is open, rather than picking one fixed width
     /// that is cramped for one of the three uses.
     /// </summary>
-    public double LeftPaneWidth => IsFormPanelOpen ? 340 : IsBookmarkPaneOpen ? 300 : 230;
+    public double LeftPaneWidth => IsFormPanelOpen ? 340 : IsBookmarkPaneOpen || IsRecentPanelOpen ? 300 : IsToolsPaneOpen ? 270 : 230;
 
     partial void OnThumbnailsChanged(PdfThumbnailSet? value)
     {
@@ -1185,16 +1216,20 @@ public partial class MainViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(LeftPaneWidth));
         if (value)
         {
-            // Thumbnails and the index share the sidebar and never show together.
-            IsBookmarkPanelOpen = false;
+            CloseOtherPanels(SidebarPanel.Thumbnails);
         }
 
-        if (_restoringSettings)
+        if (_restoringSettings || _excludingPanels)
         {
             return;
         }
 
         _settings.ThumbnailPanelOpen = value;
+        if (value)
+        {
+            _settings.BookmarkPanelOpen = false;
+        }
+
         SaveSettings();
     }
 
@@ -1410,6 +1445,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     partial void OnIsSearchOpenChanged(bool value)
     {
+        if (value)
+        {
+            CloseOtherPanels(SidebarPanel.Search);
+        }
+
         OnPropertyChanged(nameof(IsLeftPaneOpen));
         if (!value)
         {

@@ -497,4 +497,108 @@ internal static class PdfiumNative
 
     [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
     public static extern uint FPDFSignatureObj_GetTime(IntPtr signature, [Out] byte[]? buffer, uint length);
+
+    // ---- fpdf_annot.h / fpdf_edit.h : creating and editing annotations (note, stamp) ----------
+    // Signatures checked against the vendored headers (bblanchon.PDFium.Win32 153.0.7999).
+    // FPDF_BYTESTRING keys are 8-bit (LPStr); FPDF_WIDESTRING values are UTF-16LE with a
+    // terminator (LPWStr). A stamp annotation's look is not drawn by PDFium itself: it is the
+    // page objects appended to it with FPDFAnnot_AppendObject (only ink and stamp support that).
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct FS_MATRIX
+    {
+        public float A;
+        public float B;
+        public float C;
+        public float D;
+        public float E;
+        public float F;
+    }
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern bool FPDFPage_RemoveAnnot(IntPtr page, int index);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern int FPDFPage_GetAnnotIndex(IntPtr page, IntPtr annot);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern bool FPDFAnnot_SetFlags(IntPtr annot, int flags);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern int FPDFAnnot_GetFlags(IntPtr annot);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern bool FPDFAnnot_SetStringValue(
+        IntPtr annot, [MarshalAs(UnmanagedType.LPStr)] string key, [MarshalAs(UnmanagedType.LPWStr)] string value);
+
+    /// <summary>Returns the byte length including the UTF-16 terminator; <paramref name="buffer"/> null just asks for the size.</summary>
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern uint FPDFAnnot_GetStringValue(
+        IntPtr annot, [MarshalAs(UnmanagedType.LPStr)] string key, [Out] byte[]? buffer, uint bufferLength);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern bool FPDFAnnot_AppendObject(IntPtr annot, IntPtr pageObject);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern int FPDFAnnot_GetObjectCount(IntPtr annot);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern bool FPDFAnnot_SetBorder(IntPtr annot, float horizontalRadius, float verticalRadius, float borderWidth);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern IntPtr FPDFPageObj_NewTextObj(
+        IntPtr document, [MarshalAs(UnmanagedType.LPStr)] string font, float fontSize);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern bool FPDFText_SetText(IntPtr textObject, [MarshalAs(UnmanagedType.LPWStr)] string text);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern IntPtr FPDFPageObj_CreateNewRect(float x, float y, float w, float h);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern bool FPDFPath_SetDrawMode(IntPtr path, int fillMode, bool stroke);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern bool FPDFPageObj_SetStrokeColor(IntPtr pageObject, uint r, uint g, uint b, uint a);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern bool FPDFPageObj_SetFillColor(IntPtr pageObject, uint r, uint g, uint b, uint a);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern bool FPDFPageObj_SetStrokeWidth(IntPtr pageObject, float width);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern bool FPDFPageObj_GetBounds(IntPtr pageObject, out float left, out float bottom, out float right, out float top);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern void FPDFPageObj_Transform(IntPtr pageObject, double a, double b, double c, double d, double e, double f);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern bool FPDFPageObj_SetMatrix(IntPtr pageObject, ref FS_MATRIX matrix);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern void FPDFPageObj_Destroy(IntPtr pageObject);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern IntPtr FPDFPageObj_NewImageObj(IntPtr document);
+
+    /// <summary>The bitmap is copied into the image object; <paramref name="pages"/> may be null/0 for an object that is not on a loaded page yet.</summary>
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern bool FPDFImageObj_SetBitmap(IntPtr pages, int count, IntPtr imageObject, IntPtr bitmap);
+
+    // Existing page content, read-only here: the feasibility probe for editing text in place.
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern int FPDFPage_CountObjects(IntPtr page);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern IntPtr FPDFPage_GetObject(IntPtr page, int index);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern int FPDFPageObj_GetType(IntPtr pageObject);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern uint FPDFTextObj_GetText(IntPtr textObject, IntPtr textPage, [Out] byte[]? buffer, uint length);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern bool FPDFPage_GenerateContent(IntPtr page);
 }

@@ -90,7 +90,7 @@ public sealed class PdfDocument : IDisposable
                 throw PdfException.FromLastPdfiumError($"Impossibile caricare la pagina {index}.");
             }
 
-            return new PdfPage(pageHandle, index);
+            return new PdfPage(pageHandle, index, this);
         });
 
     /// <summary>
@@ -250,10 +250,23 @@ public sealed class PdfDocument : IDisposable
 
     /// <summary>Writes the (possibly modified) document to <paramref name="destinationPath"/>.</summary>
     public void SaveAs(string destinationPath, bool removeSecurity = false)
+    {
+        using var stream = new FileStream(destinationPath, FileMode.Create, FileAccess.Write);
+        WriteTo(stream, removeSecurity, $"Impossibile salvare il documento in '{destinationPath}'.");
+    }
+
+    /// <summary>The (possibly modified) document as the bytes <see cref="SaveAs"/> would write - for handing to code that edits a PDF file's structure (see <c>PdfFormDesigner</c>).</summary>
+    public byte[] SaveToBytes(bool removeSecurity = false)
+    {
+        using var stream = new MemoryStream();
+        WriteTo(stream, removeSecurity, "Impossibile serializzare il documento.");
+        return stream.ToArray();
+    }
+
+    private void WriteTo(Stream stream, bool removeSecurity, string failureMessage)
         => PdfiumRuntime.Invoke(() =>
         {
             ThrowIfDisposed();
-            using var stream = new FileStream(destinationPath, FileMode.Create, FileAccess.Write);
 
             PdfiumNative.WriteBlockDelegate writeBlock = (_, data, size) =>
             {
@@ -274,8 +287,10 @@ public sealed class PdfDocument : IDisposable
             GC.KeepAlive(writeBlock);
             if (ok == 0)
             {
-                throw PdfException.FromLastPdfiumError($"Impossibile salvare il documento in '{destinationPath}'.");
+                throw PdfException.FromLastPdfiumError(failureMessage);
             }
+
+            return 0;
         });
 
     internal IntPtr Handle

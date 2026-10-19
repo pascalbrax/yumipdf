@@ -8,11 +8,15 @@ public sealed class PdfPage : IDisposable
     private readonly IntPtr _handle;
     private bool _disposed;
 
-    internal PdfPage(IntPtr handle, int index)
+    internal PdfPage(IntPtr handle, int index, PdfDocument document)
     {
         _handle = handle;
         Index = index;
+        Document = document;
     }
+
+    /// <summary>The document this page belongs to - needed to create new page objects (text, images) for it.</summary>
+    internal PdfDocument Document { get; }
 
     public int Index { get; }
 

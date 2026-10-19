@@ -323,6 +323,11 @@ altrove in WinUI3, non testato live in questa sessione.
 
 ## Barra laterale sinistra: Cerca, Compila modulo e Miniature condividono lo stesso pannello
 
+> **Aggiornamento (successivo): un solo pannello alla volta.** Quanto segue sulle sovrapposizioni descrive la prima
+> versione. Ora **tutti** i pannelli della barra - Miniature, Indice, Strumenti, Compila modulo, Cerca e Recenti - si
+> escludono a vicenda, su richiesta esplicita: aprirne uno chiude gli altri (e quindi spegne i loro pulsanti, legati
+> agli stessi flag). Vedi "Un solo pannello alla volta" più sotto.
+
 Le tre funzioni vivevano prima in tre posti diversi (Cerca: fascia sopra l'area pagine; Compila modulo:
 pannello a destra; Miniature: pannello a sinistra) - ora condividono lo stesso `SplitView.Pane` a
 sinistra (`MainWindow.xaml`, `ThumbnailSplitView`), sovrapposte quando più di una è attiva insieme
@@ -371,8 +376,8 @@ Cerca/Compila modulo, che si sovrappongono. Il pulsante "Indice" compare solo se
 la scelta dell'utente è ricordata tra le sessioni (`AppSettings.BookmarkPanelOpen`) come per le miniature.
 Larghezza 300px quando l'indice è il contenuto (i titoli sono più lunghi di una miniatura). Il clic su una
 voce porta alla pagina (`GoToPage`, lo stesso percorso delle miniature); la freccia espande/comprime senza
-navigare. La barra di Cerca si sovrappone alla parte alta del pannello: l'albero ne segue l'altezza con un
-margine superiore (`OnSearchBarSizeChanged`), così le prime voci non restano nascoste.
+navigare. (Il margine superiore che faceva scendere l'albero sotto la barra di Cerca - `OnSearchBarSizeChanged` - non serve più
+e è stato tolto: con un solo pannello alla volta nulla si sovrappone.)
 
 **Aspetto dell'indice**: la gerarchia si legge dal carattere, non solo dall'indentazione (`BookmarkNodeViewModel`:
 capitoli di primo livello 14 pt semibold con un po' d'aria sopra e sotto, voci annidate 13 pt normali, dal
@@ -400,6 +405,230 @@ non-ASCII); in app con UI Automation (albero, esclusione reciproca col pulsante 
 scorrimento dopo l'invocazione di ogni voce, margine con Cerca aperto) e uno screenshot. Il clic reale del
 mouse sulle voci non è stato provato (UI Automation `Invoke` è un percorso diverso dal clic), né un indice
 molto grande.
+
+## Annotazioni: note e timbri (M3)
+
+Prima di M3 l'app non aveva alcuna interfaccia per le annotazioni (esisteva solo `AddHighlight` nel motore,
+mai collegato). Ora: **note** (annotazione `/Text`) e **timbri** (`/Stamp`: testuali con data opzionale, o
+un'immagine scelta dall'utente), come annotazioni PDF standard - le vedono anche gli altri lettori e restano
+modificabili qui finché il documento non viene appiattito ("Unisci" nel pannello modulo cuoce nella pagina
+anche note e timbri).
+
+### Motore (`PdfEditableAnnotations`, `PdfAnnotationInfo`, `PdfRect`)
+
+`List` (solo note e timbri - non link, widget, evidenziazioni, popup; salta le annotazioni nascoste),
+`AddNote`, `AddTextStamp`, `AddImageStamp` (BGRA con alfa non premoltiplicato), `SetRect`, `SetContents`,
+`Remove`. Tutte le coordinate in punti PDF, origine in basso a sinistra; gli indici sono quelli della lista
+di annotazioni della pagina (cambiano dopo un'eliminazione: si rilegge la lista). I binding nuovi
+(`PdfiumNative`) sono verificati contro `fpdf_annot.h`/`fpdf_edit.h` del pacchetto NuGet.
+
+**Cosa ha mostrato la prova su PDFium 153** (parte dei dettagli non è documentata):
+- **Nota**: bastano un rettangolo e `/Contents`; PDFium disegna da solo l'icona gialla. Sopravvive a
+  salvataggio e riapertura.
+- **Timbro**: PDFium non gli dà nessun aspetto; l'aspetto sono gli oggetti di pagina (testo, rettangolo,
+  immagine) aggiunti con `FPDFAnnot_AppendObject` (supportata solo per ink e stamp). **Il rettangolo
+  dell'annotazione va impostato PRIMA di aggiungere gli oggetti**: il `/BBox` dello stream di aspetto è
+  preso dal rettangolo in quel momento; impostato dopo, il BBox resta 0x0 e non si vede nulla (0 pixel
+  cambiati - il primo tentativo).
+- **Anomalia sul ridimensionamento** (misurata con tentativi mirati): se il nuovo rettangolo *contiene* il
+  BBox dell'aspetto, PDFium riscrive il BBox con il nuovo rettangolo invece di scalare: un timbro ingrandito
+  resta della dimensione di prima dentro una cornice vuota più grande. Spostamenti, riduzioni e rettangoli
+  disgiunti non ne sono colpiti. Letto dal file salvato: nei casi sovrapposti `/BBox` = nuovo `/Rect`.
+- **Soluzione**: l'aspetto di un timbro si costruisce **fuori pagina** (`CanonicalOrigin` = -20000, -20000),
+  dove nessun rettangolo sulla pagina può contenerlo, e solo dopo si sposta il rettangolo sulla pagina:
+  da lì ogni spostamento/ridimensionamento è puro scaling dal BBox al rettangolo, a qualunque dimensione.
+  Verificato ingrandendo 2x, 1,2x, rimpicciolendo 0,5x, spostando e ingrandendo insieme, anche dopo
+  salvataggio e riapertura.
+- **Timbri di altri software** hanno il BBox sulla pagina e non si ingrandiscono in modo affidabile: i nostri
+  portano una voce privata `/PDF26` e solo quelli sono ridimensionabili (`PdfAnnotationInfo.CanResize`;
+  gli altri si possono comunque spostare). Spostare un timbro non lo tocca mai (stessa dimensione = non
+  contiene il vecchio rettangolo).
+- Le note hanno dimensione fissa (24 pt): niente maniglia.
+- La data della modifica (`/M`) viene aggiornata a ogni intervento; non si scrive nessun autore (`/T`):
+  metterci il nome utente di Windows nel file sarebbe una scelta di privacy da prendere esplicitamente.
+
+### Interfaccia
+
+- **Pannello "Strumenti"** (pulsante "Strumenti" sulla barra, nella barra laterale sinistra): "Aggiungi una
+  nota" (interruttore), sei timbri testuali colorati, "Aggiungi la data", "Immagine...". Prima erano pulsanti
+  "Nota" e "Timbro" sulla barra: su richiesta sono stati spostati nel pannello, e in barra restano solo
+  "Strumenti" e "Salva con nome..." (visibili solo con un documento aperto). Il pannello è un'altra sovrapposizione
+  nello stesso `SplitView.Pane` (opaco, esclusivo con gli altri pannelli della barra), largo 270 px (`LeftPaneWidth`), e **non** è ricordato fra le sessioni (`IsToolsPanelOpen`: ha senso solo
+  con un documento aperto). Il pannello resta aperto dopo un inserimento; lo strumento è comunque monouso.
+  I pulsanti sono accessibili per nome (`AutomationProperties.Name`): senza, un `ToggleButton` con contenuto
+  composto non ha nome per UI Automation.
+- **Inserimento** (`MainViewModel.Annotations.cs`): scegliere lo strumento e fare clic sulla pagina; lo
+  strumento è *monouso* e finisce col clic (Esc lo annulla; un suggerimento compare nella barra di stato).
+  Un'immagine viene decodificata con `BitmapDecoder` (alfa non premoltiplicato, lato lungo al massimo 2000 px:
+  un timbro è largo pochi centimetri), poi scalata a 160 pt sul lato lungo.
+- **Livello interattivo per pagina** (`PdfAnnotationLayer`, un `Canvas` nel template della pagina, sopra i
+  campi del modulo e sotto le evidenziazioni di ricerca): un'area di clic trasparente sopra ogni annotazione.
+  Senza strumento attivo il livello non ha sfondo, quindi i clic fuori dalle annotazioni passano a selezione
+  del testo e campi sotto; con uno strumento attivo l'intera pagina cattura il clic. Selezionata = cornice
+  nel colore d'accento (+ maniglia d'angolo se ridimensionabile); trascinamento per spostare (soglia 3 px),
+  maniglia per ridimensionare mantenendo le proporzioni, Canc per eliminare, Invio/F2/doppio clic per il
+  testo di una nota, menu contestuale (Modifica testo / Elimina), clic altrove o Esc per deselezionare.
+  Il testo di una nota si modifica in un flyout; chiuderlo salva; una nota lasciata vuota viene eliminata.
+- **Modifiche al documento** (`EditPageAsync`): accodate dietro il rendering/le altre modifiche (PDFium lo
+  tocca un lavoro alla volta, come per i campi modulo), eseguono la modifica, rileggono le annotazioni della
+  pagina e la ridisegnano; la miniatura si aggiorna. Il livello viene ricostruito a ogni modifica (poche
+  annotazioni per pagina) e restituisce il fuoco tastiera alla stessa annotazione, così Canc continua a
+  funzionare dopo uno spostamento.
+- **Modifiche non salvate** (`HasUnsavedChanges`, anche per i campi compilati): "● Modifiche non salvate"
+  nella barra di stato; aprire un altro file o chiudere la finestra chiede di salvare, non salvare o
+  annullare (`AppWindow.Closing` annullato e rilanciato dopo la scelta). Il file originale non viene mai
+  sovrascritto: si salva sempre in un nuovo file.
+
+### Verifica
+
+18 test sul motore (`PdfEditableAnnotationsTests`: disegno, elenco, salvataggio e riapertura, scaling a 2x/1,2x/0,5x,
+ridimensionamento dopo la riapertura, trasparenza dell'immagine, limiti di pagina, ripristino esatto dopo
+l'eliminazione). Dal vivo con UI Automation, clic e trascinamenti reali del mouse e screenshot: inserire una
+nota (e il suo testo), spostarla, inserire un timbro dal menu, ridimensionarlo dalla maniglia, eliminarlo con Canc,
+la finestra "Modifiche non salvate" (Annulla/Non salvare), la riapertura di un file con una nota esistente, un
+documento con campi modulo (ambiente form di PDFium attivo) più uno zoom dopo l'inserimento. **Non provato dal
+vivo**: il salvataggio fino in fondo dal dialogo del sistema (il dialogo si apre col nome suggerito giusto, ma
+non sono riuscito a pilotarlo - e un tentativo maldestro mi ha fatto invocare per errore una voce
+dell'elenco, bloccata dalla richiesta di sovrascrittura del sistema e annullata chiudendo l'app: nessun file
+toccato; il percorso di scrittura è però lo stesso `SaveFilledFormAsync` già usato e il salvataggio con
+annotazioni è coperto dai test del motore), l'inserimento di un timbro-immagine dal selettore file (il
+motore è testato con pixel sintetici), tooltip del testo della nota, schermi ad alta densità.
+
+### Editing di testo e immagini già presenti nella pagina: prova di fattibilità
+
+Richiesta esplicitamente prima di decidere l'ordine del lavoro. Con le API di PDFium
+(`FPDFPage_GetObject`, `FPDFTextObj_GetText`, `FPDFText_SetText`, `FPDFPage_GenerateContent`):
+- **Su un font standard non incorporato funziona del tutto**: "Ciao mondo" è diventato "Ciao Pascal, città è
+  più" (accenti compresi), il testo riletto dopo salvataggio e riapertura coincide.
+- **Su un documento reale con font incorporato a sottoinsieme no**: sul file da 104 pagine (doPDF) la riga
+  "Comune di Paradiso" sostituita con "QZXJK modificato wyk" ha mostrato **riquadri vuoti** per ogni carattere
+  assente dal sottoinsieme (Q, X, J, K, w, y...) e testo corretto solo per le lettere già presenti. Un
+  sottoinsieme contiene solo i glifi usati dal documento originale: il limite è nel file, non in PDFium.
+- **Nessun riflusso**: ogni oggetto testo è una riga; cambiare la lunghezza non sposta ciò che segue, e non c'è
+  nozione di paragrafo.
+- Sostituire un oggetto testo con uno nuovo in un font di ripiego (Helvetica o un font di Windows incorporato
+  per intero) è fattibile ma cambia l'aspetto: il risultato non assomiglia a ciò che fa Acrobat.
+Conclusione: una modifica "come Acrobat" richiederebbe una libreria di editing/layout vera; con PDFium da solo si
+può offrire al massimo "sostituisci questa riga con un testo in un font a scelta" (e "elimina oggetto").
+Decisione rimandata all'utente.
+
+## File recenti
+
+Pulsante "Recenti" in barra (accanto ad "Apri...") che apre un **pannello della barra laterale** (all'inizio era un menu
+a tendina; spostato su richiesta nella barra laterale, esclusivo con gli altri pannelli - vedi "Un solo pannello alla
+volta"). Funziona anche senza documento aperto: è il modo di arrivare al primo. L'elenco (`AppSettings.RecentFiles`, al massimo 10, il più recente in cima) è nello stesso
+`settings.json` del resto: si aggiorna **solo dopo un'apertura riuscita** (`MainViewModel.RegisterRecent`: una password
+sbagliata o un file illeggibile non entrano) e vale anche per i file passati da riga di comando e per gli URL. Un
+file già presente si sposta in cima invece di duplicarsi (confronto senza maiuscole/minuscole, come Windows).
+Il pannello (`RecentPanel`, `ListView` su `MainViewModel.RecentEntries`, `RecentFileEntry`) mostra per ogni voce il
+nome del file in grassetto e sotto la cartella (per un URL, l'host) - il che sostituisce la disambiguazione fra
+omonimi del menu - più il percorso completo nel suggerimento, una croce per togliere la singola voce e "Svuota
+elenco" in fondo; "Nessun file recente" se è vuoto. Un clic apre la voce (dopo l'avviso "modifiche non salvate") e
+**chiude il pannello**: l'utente è andato avanti.
+
+Una voce il cui file non esiste più viene tolta dall'elenco al primo tentativo (`File non trovato` da
+`FileSourceResolver`): fallirebbe ogni volta. Nessun controllo di esistenza all'apertura del pannello, di proposito: su
+una cartella di rete non raggiungibile ogni controllo può bloccarsi per secondi. Scegliere una voce passa per lo
+stesso avviso "modifiche non salvate" di "Apri...". Non si usa il Jump List / "Documenti recenti" di Windows
+(non richiesto). Verificato dal vivo con UI Automation (nella versione a menu): ordine, disambiguazione, apertura di
+una voce, rimozione di una voce mancante con il messaggio di errore, "Svuota elenco"; nella versione a pannello: la
+sua esclusività con gli altri pulsanti e il suo aspetto (screenshot).
+
+## Un solo pannello alla volta
+
+Richiesta esplicita: i sei pannelli della barra laterale (`SidebarPanel`: Thumbnails, Bookmarks, Tools, Form,
+Search, Recent) si escludono a vicenda, **Cerca compreso** (prima Cerca si sovrapponeva agli altri). Meccanismo
+(`MainViewModel.Sidebar.cs`): ogni pannello ha il suo flag (`IsThumbnailPanelOpen`, `IsBookmarkPanelOpen`,
+`IsToolsPanelOpen`, `IsFormPanelOpen`, `IsSearchOpen`, `IsRecentPanelOpen`), legato in due direzioni al proprio
+pulsante in barra; quando uno si accende il suo `On...Changed` chiama `CloseOtherPanels`, che spegne gli altri - e
+siccome i pulsanti sono legati agli stessi flag, si spengono da soli. Ctrl+F passa dallo stesso flag di Cerca.
+- **Preferenza di miniature/indice**: restano ricordate fra le sessioni, ma una chiusura *causata dall'apertura di un
+  altro pannello* (`_excludingPanels`) non la cancella: aprire Cerca per un attimo non fa sparire le miniature dal
+  prossimo avvio. Scegliere miniature spegne l'indice nelle impostazioni e viceversa.
+- **Maniglia sul bordo**: ora chiude qualunque pannello sia aperto (`CloseSidebar`, che è una scelta dell'utente e
+  quindi viene ricordata) e la freccia segue `IsLeftPaneOpen`; da chiusa riapre l'ultimo fra miniature e indice.
+- **Larghezza** (`LeftPaneWidth`): Compila modulo 340, Indice e Recenti 300, Strumenti 270, il resto 230.
+- Nota: i pulsanti dei pannelli che non servono (Compila modulo senza campi, Indice senza indice, Miniature sotto le
+  3 pagine) restano nascosti, come prima. Un pulsante in overflow ("...") della barra non risponde a Ctrl+F
+  finché la finestra è stretta: già così prima (l'acceleratore di un comando in overflow non scatta).
+- Verificato dal vivo con UI Automation, premendo i pulsanti in sequenza e leggendo lo stato di tutti: ogni
+  combinazione provata lascia acceso solo l'ultimo (con un documento a quattro pagine con indice: Miniature, Indice,
+  Strumenti, Cerca, Recenti; con un modulo: Compila modulo, Strumenti, Recenti, Cerca), anche con Ctrl+F.
+
+## Campi modulo creati dall'utente (iText)
+
+Si aggiungono campi di testo e caselle di controllo dal pannello "Strumenti" > "Campi modulo": si sceglie lo
+strumento (monouso, come note e timbri), si fa clic sulla pagina, si apre un editor delle proprietà. Sono
+campi AcroForm veri: compilabili da qualunque lettore PDF.
+
+### Perché iText
+
+PDFium legge e compila i campi ma **non ha nessuna chiamata per crearne** (`FPDFPage_CreateAnnot` non supporta i
+widget; le API dei dizionari non sono pubbliche). Serve una libreria che sappia scrivere la struttura. Valutate,
+con una prova concreta su un PDF vero:
+- **PDFsharp 6.5 (MIT)**: i costruttori di tutte le classi dei campi (`PdfTextField`, `PdfCheckBoxField`, ...) sono
+  `internal`; senza forzature con la reflection non può creare campi. Scartata.
+- **iText Core 9.8 (AGPL-3.0)**: `TextFormFieldBuilder`/`CheckBoxFormFieldBuilder` + `PdfAcroForm.AddField`, in append
+  mode. Provato: PDFium rilegge i due campi creati con nome, tipo e rettangolo giusti. Scelta.
+Dipendenza: ~5 MB di assembly (`itext` + `itext.commons`). **Licenza**: l'AGPL, se l'app viene distribuita, impone di
+offrire i sorgenti dell'app a chi la riceve (o di acquistare la licenza commerciale di iText); accettata dall'utente
+dopo che gliel'ho spiegata. Va nel README (licenze di terze parti) e nella finestra "Informazioni".
+
+### Motore (`PdfFormDesigner`, `PdfDocument.SaveToBytes`)
+
+`PdfFormDesigner.Apply(byte[] pdf, changes)` → nuovi byte. Cambiamenti: `AddFieldChange(pagina, PdfFieldSpec)`,
+`ModifyFieldChange`/`RemoveFieldChange` (campo esistente trovato per pagina + posizione nella lista di annotazioni,
+la stessa che riporta `PdfFormField`). Si parte dai byte che scrive **PDFium** (`SaveToBytes`, che include le
+modifiche in memoria: annotazioni, valori compilati) e si riapre il risultato. Verificato su un file di
+partenza con tabella xref classica, e su uno scritto con xref stream + object stream (e anche dopo il giro in
+PDFium): l'append mode di iText gestisce entrambi, quindi non serve uno scrittore proprio. Dettagli:
+- **Appearance stream**: dopo aver impostato le proprietà si chiama `RegenerateField()`, altrimenti il widget non ha
+  un aspetto proprio e i lettori che non lo ricavano dalle proprietà non mostrerebbero niente. Bordo nero 1 pt e
+  sfondo bianco.
+- **Nomi**: non vuoti, senza punti (un punto è una gerarchia: "a.b" è il campo b del gruppo a), non già usati - due
+  campi con lo stesso nome sono per un lettore un solo campo mostrato due volte. Controllo nel motore (eccezione) e
+  nell'interfaccia (messaggio nell'editor).
+- **Gli altri contenuti restano**: pagina, annotazioni esistenti (nota ritrovata dopo `Apply`), rendering invariato
+  senza i campi.
+- Osservazione: la proprietà "spuntata" di una casella è nel file (`/V /Yes`, `/AS /Yes`) e PDFium la **disegna**
+  spuntata, ma il suo `FPDFAnnot_IsChecked` rispondeva falso: il test controlla il file e l'inchiostro disegnato, non
+  quella chiamata.
+- **iText scrive il proprio Producer** ("iText Core ... AGPL version") nei file in cui si sono aggiunti campi: è nel
+  roadmap con i metadati.
+- Test: `PdfFormDesignerTests` (aggiunta di testo/casella/multilinea, compilazione e spunta da parte di PDFium,
+  contenuto e annotazioni invariati, xref stream, spostamento/rinomina/eliminazione, tooltip/obbligatorio/sola lettura/
+  dimensione, nomi non validi o già usati, errori su campi inesistenti).
+
+### Interfaccia (`MainViewModel.FieldDesign.cs`, `DesignField`)
+
+Un campo appena piazzato **non è ancora nel documento**: vive nell'app come `DesignField` e il livello della pagina
+(`PdfAnnotationLayer`, lo stesso di note e timbri) lo disegna come segnaposto (riquadro bianco con cornice sottile e,
+per un campo di testo, il nome) con gli stessi gesti: selezione, trascinamento, maniglia d'angolo (un campo di
+testo si allarga liberamente, una casella resta quadrata), Canc, menu contestuale, Invio/F2/doppio clic per le
+proprietà. Editor delle proprietà in un flyout: nome (con messaggio se vuoto, con punti o già usato - anche rispetto
+ai campi che il documento aveva già), suggerimento, obbligatorio, sola lettura; testo: su più righe e dimensione del
+carattere (0 = automatica); casella: spuntata di default. OK applica; cliccare fuori applica ciò che è valido.
+- **Al salvataggio** (`SaveWithPendingFieldsAsync`): `SaveToBytes` (PDFium) → `PdfFormDesigner.Apply` → file; poi
+  **il file salvato viene aperto** (come "Salva con nome" di un editor di testo), così i campi sono subito veri:
+  compaiono in "Compila modulo" e come caselle sulla pagina. "Unisci prima di salvare" non si applica in quel
+  salvataggio (appiattirebbe i campi appena creati).
+- **Perché non si scrivono subito nel documento in memoria**: avrebbe voluto dire rileggere il documento a ogni
+  piazzamento (e fermare e riavviare miniature, indicizzazione del testo e OCR che tengono il riferimento al
+  documento). Scrivere una volta sola al salvataggio è molto più semplice e robusto; il prezzo è che il campo si
+  vede come segnaposto finché non si salva.
+- **Limite dichiarato**: si modificano solo i campi creati nella sessione. Quelli che il documento aveva già non si
+  toccano (roadmap): spostarne uno lascerebbe il vecchio disegno nel bitmap della pagina fino al salvataggio.
+- Modifiche non salvate: i campi piazzati contano (`HasPendingFields` → `HasUnsavedChanges`): aprire un altro file o
+  chiudere chiede conferma.
+- Verifica dal vivo (UI Automation, clic e trascinamenti reali, screenshot): piazzare campo e casella, editor delle
+  proprietà, messaggio "Esiste già un campo con questo nome", spostamento, ridimensionamento libero, "Salva con
+  nome..." fino in fondo (dialogo di sistema compilato da tastiera: **il selettore file gira in un altro processo,
+  `PickerHost`**, quindi è lui ad avere il primo piano, non l'app - un controllo sul PID dell'app lo scambia per
+  assenza del dialogo), riapertura del file salvato con i due campi in "Compila modulo" e sulla pagina. Un difetto
+  trovato lì e corretto: il pannello "Compila modulo" aveva uno sfondo semitrasparente (`LayerFill`) e lasciava
+  vedere il pannello Strumenti sotto; ora i pannelli sovrapposti sono opachi (`SolidBackgroundFillColorBase`).
+  Non provato: salvare un documento protetto da password con campi (iText ne chiede la password; il messaggio è
+  quello di errore generico), lo stato "spuntata di default" dall'interfaccia, un documento molto grande.
 
 ## Selezione del testo (drag-to-select) - solo pagine con testo nativo
 
@@ -484,7 +713,8 @@ riporta solo `AssemblyVersion`, sempre a 4 cifre tipo `0.1.0.0`) e mostra solo l
 ## Indicazione PDF/A nella barra di stato: autodichiarazione, non validazione
 
 Alla riapertura di un documento la barra di stato mostra "PDF/A-2B" (o qualunque livello
-dichiarato) oppure "Non PDF/A" accanto al nome del file (`MainViewModel.PdfAStatusText`,
+dichiarato) accanto al nome del file - **solo se il documento lo dichiara**: per un PDF ordinario non compare nulla (prima
+mostrava "Non PDF/A", tolto su richiesta: non esserlo non è un'informazione) (`MainViewModel.PdfAStatusText`,
 calcolato in `OpenAsync` da `DetectPdfAConformance`). **Non è un validatore**: legge solo
 l'autodichiarazione che il file stesso porta nei propri metadati XMP (`pdfaid:part`/
 `pdfaid:conformance`, ISO 19005 Annex D) - esattamente quello che mostrano anche Adobe Acrobat,
@@ -510,8 +740,8 @@ eccezioni indipendentemente da cosa circondi il packet XMP) e l'estrazione di `p
 **Limiti noti, non un bug**: non trova nulla se lo stream `/Metadata` è compresso (legale ma
 inusuale - la maggior parte dei produttori PDF/A lo lascia non compresso apposta, per essere
 trovabile così da strumenti esterni) o se usa un prefisso di namespace diverso dal convenzionale
-`pdfaid`. In entrambi i casi il risultato è "Non PDF/A" anche per un documento che in realtà lo è -
-un falso negativo accettabile per un'indicazione informativa, non per un validatore.
+`pdfaid`. In entrambi i casi non si mostra nulla anche per un documento che in realtà lo è - un falso negativo
+accettabile per un'indicazione informativa, non per un validatore.
 
 **Verificato**: due file PDF minimi creati a mano (uno con la dichiarazione PDF/A-2B nei metadati
 XMP, uno senza) apribili correttamente da PDFium tramite `PdfDocument.OpenFromPath` e corretti

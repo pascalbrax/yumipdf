@@ -11,4 +11,7 @@ public sealed class AppSettings
 
     /// <summary>Whether the index (bookmarks) is the content of the left sidebar. Never true together with <see cref="ThumbnailPanelOpen"/>: the two share the sidebar and exclude each other.</summary>
     public bool BookmarkPanelOpen { get; set; }
+
+    /// <summary>The documents opened most recently (paths or URLs), newest first - see <c>MainViewModel.RegisterRecent</c>.</summary>
+    public List<string> RecentFiles { get; set; } = new();
 }

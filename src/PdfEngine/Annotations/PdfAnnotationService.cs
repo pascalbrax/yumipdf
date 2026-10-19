@@ -64,7 +64,7 @@ public static class PdfAnnotationService
         });
     }
 
-    // TODO(roadmap M2): note/free-text, ink (disegno a mano libera) e stamp seguono lo
-    // stesso schema (FPDFPage_CreateAnnot con il subtype relativo); ink richiede in più
-    // FPDFAnnot_AddInkStroke per ogni tratto disegnato dall'utente.
+    // Note e timbri (con spostamento, ridimensionamento, testo, eliminazione): vedi
+    // PdfEditableAnnotations. Testo libero e disegno a mano libera (ink) sono nel backlog di
+    // docs/ROADMAP.md; ink richiederebbe FPDFAnnot_AddInkStroke per ogni tratto.
 }

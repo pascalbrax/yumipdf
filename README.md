@@ -16,6 +16,12 @@ Visualizzatore, editor e compilatore di moduli PDF nativo per Windows 10 e 11.
   con anteprima live del valore appena scritto sulla pagina; salvataggio con nome, con appiattimento
   opzionale (rende i valori permanenti, non più modificabili in quella sessione)
 - Annotazione di evidenziazione
+- Pannello "Recenti" nella barra laterale con gli ultimi documenti aperti (la barra mostra un solo pannello alla volta: Miniature, Indice, Strumenti, Compila modulo, Cerca, Recenti)
+- Campi di testo e caselle di controllo compilabili che si aggiungono al PDF dal pannello "Strumenti" (nome,
+  suggerimento, obbligatorio, sola lettura, multilinea, dimensione del carattere, spuntata di default)
+- Pannello "Strumenti" con note e timbri da inserire sulle pagine: nota con testo, timbri testuali (APPROVATO, BOZZA, ... con data opzionale)
+  o con un'immagine propria; si selezionano, spostano, ridimensionano (timbri) ed eliminano; "Salva con nome..."
+  le scrive nel nuovo file come annotazioni PDF standard (le vedono anche gli altri lettori)
 - Stampa (dialogo nativo, intervallo pagine)
 - Selezione del testo per trascinamento (solo pagine con testo nativo), con copia automatica negli appunti
 - Navigazione dall'indice del documento (segnalibri) nella barra laterale, in alternativa alle miniature
@@ -26,7 +32,7 @@ Visualizzatore, editor e compilatore di moduli PDF nativo per Windows 10 e 11.
 - Indicazione (barra di stato e banner in alto) se il documento aperto si autodichiara PDF/A (letta dai suoi
   metadati XMP - non una validazione completa, vedi [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md))
 
-Le annotazioni avanzate (nota, disegno libero, timbro) e l'installer sono pianificati nelle milestone
+Le annotazioni avanzate (nota, timbro) e l'installer sono pianificati nelle milestone
 successive - vedi la roadmap.
 
 ## Requisiti di sviluppo
@@ -85,3 +91,6 @@ dotnet run --project src/App/App.csproj -- "https://example.com/file.pdf"
 - PDFium (via `bblanchon.PDFium.Win32`): Apache-2.0
 - CommunityToolkit.Mvvm: MIT
 - System.Security.Cryptography.Pkcs (verifica dell'integrità delle firme digitali): MIT
+- iText Core 9 (creazione dei campi modulo): **AGPL-3.0**. Se l'app viene distribuita, l'AGPL impone di offrire anche i
+  sorgenti dell'app a chi la riceve, con la stessa licenza; l'alternativa è una licenza commerciale di iText.
+  Valutato anche PDFsharp (MIT): non può creare campi, i costruttori sono `internal`

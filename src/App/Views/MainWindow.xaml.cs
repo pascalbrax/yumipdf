@@ -1,5 +1,9 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media;
+using Windows.Graphics.Imaging;
+using Windows.Storage;
 using Windows.Storage.Pickers;
 using WinRT.Interop;
 using Pdf26.Services;
@@ -19,6 +23,7 @@ public sealed partial class MainWindow : Window
     private Microsoft.UI.Dispatching.DispatcherQueueTimer? _refitTimer;
     private long _ignoreScrollSyncUntil;
     private bool _syncingFromScroll;
+    private bool _closeConfirmed;
 
     public MainViewModel ViewModel { get; } = new();
 
@@ -35,6 +40,10 @@ public sealed partial class MainWindow : Window
         ThumbnailStrip.PageActivated += OnThumbnailPageActivated;
         ThumbnailStrip.CenterPageChanged += (_, pageIndex) => ViewModel.SetThumbnailFocus(pageIndex);
         UpdateSidebarHandleGlyph();
+        // A click anywhere on the pages that is not on an annotation clears the selection. Heard even when
+        // something underneath handled it (a text selection drag, a form field): those still count as "elsewhere".
+        PagesScrollViewer.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler(OnPagesPointerPressed), handledEventsToo: true);
+        AppWindow.Closing += OnAppWindowClosing;
 
         if (_initialSource is not null)
         {
@@ -93,7 +102,7 @@ public sealed partial class MainWindow : Window
             ThumbnailStrip.SetSource(ViewModel.Thumbnails);
             ThumbnailStrip.ScrollToPage(ViewModel.CurrentPageIndex, animate: false);
         }
-        else if (e.PropertyName is nameof(MainViewModel.IsThumbnailPaneOpen) or nameof(MainViewModel.IsBookmarkPaneOpen))
+        else if (e.PropertyName == nameof(MainViewModel.IsLeftPaneOpen))
         {
             UpdateSidebarHandleGlyph();
         }
@@ -253,10 +262,6 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    /// <summary>Keeps the index clear of the Cerca bar, which overlays the top of the sidebar while it is open (its height is 0 when it is not).</summary>
-    private void OnSearchBarSizeChanged(object sender, SizeChangedEventArgs e)
-        => BookmarkTree.Margin = new Thickness(0, SearchBar.ActualHeight, 0, 0);
-
     private void GoToPage(int pageIndex)
     {
         if (ViewModel.CurrentPageIndex == pageIndex)
@@ -275,15 +280,19 @@ public sealed partial class MainWindow : Window
 
     private void OnSidebarHandleClicked(object sender, RoutedEventArgs e)
     {
-        if (ViewModel.IsBookmarkPaneOpen)
+        if (ViewModel.IsLeftPaneOpen)
         {
-            _handleReopensBookmarks = true;
-            ViewModel.IsBookmarkPanelOpen = false;
-        }
-        else if (ViewModel.IsThumbnailPaneOpen)
-        {
-            _handleReopensBookmarks = false;
-            ViewModel.IsThumbnailPanelOpen = false;
+            // Closes whichever panel is open; of thumbnails and index, the one that was showing is what the next click brings back.
+            if (ViewModel.IsBookmarkPaneOpen)
+            {
+                _handleReopensBookmarks = true;
+            }
+            else if (ViewModel.IsThumbnailPaneOpen)
+            {
+                _handleReopensBookmarks = false;
+            }
+
+            ViewModel.CloseSidebar();
         }
         else if ((_handleReopensBookmarks || ViewModel.Thumbnails is null) && ViewModel.Bookmarks.Count > 0)
         {
@@ -298,11 +307,40 @@ public sealed partial class MainWindow : Window
     private void UpdateSidebarHandleGlyph()
     {
         // Points at where the sidebar will go: back to the left edge when it shows thumbnails or the index, out to the right when closed.
-        SidebarHandleGlyph.Glyph = ViewModel.IsThumbnailPaneOpen || ViewModel.IsBookmarkPaneOpen ? "" : "";
+        SidebarHandleGlyph.Glyph = ViewModel.IsLeftPaneOpen ? "" : "";
     }
+
+    // ---- recent files ------------------------------------------------------------------
+
+    /// <summary>Opens a recent document (after the unsaved-changes check) and closes the panel: the user moved on.</summary>
+    private async void OnRecentEntryClicked(object sender, ItemClickEventArgs e)
+    {
+        if (e.ClickedItem is not RecentFileEntry entry || !await ConfirmLeavingDocumentAsync())
+        {
+            return;
+        }
+
+        ViewModel.IsRecentPanelOpen = false;
+        await OpenSourceAsync(CommandLineParser.Classify(entry.Path));
+    }
+
+    private void OnRemoveRecentClicked(object sender, RoutedEventArgs e)
+    {
+        if (((FrameworkElement)sender).Tag is RecentFileEntry entry)
+        {
+            ViewModel.RemoveRecent(entry.Path);
+        }
+    }
+
+    private void OnClearRecentClicked(object sender, RoutedEventArgs e) => ViewModel.ClearRecent();
 
     private async void OnOpenClicked(object sender, RoutedEventArgs e)
     {
+        if (!await ConfirmLeavingDocumentAsync())
+        {
+            return;
+        }
+
         var picker = new FileOpenPicker();
         // Unpackaged Win32 apps must associate WinRT pickers with a window handle explicitly.
         InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
@@ -446,22 +484,29 @@ public sealed partial class MainWindow : Window
     }
 
     private async void OnSaveFilledFormClicked(object sender, RoutedEventArgs e)
+        => await SaveAsAsync(ViewModel.FlattenBeforeSave, "compilato");
+
+    /// <summary>The toolbar's "Salva con nome...": the document as it is now - annotations and filled fields kept editable, nothing flattened.</summary>
+    private async void OnSaveAsClicked(object sender, RoutedEventArgs e)
+        => await SaveAsAsync(flatten: false, "modificato");
+
+    /// <summary>Asks where to save and writes the document there. False if the user cancelled or the save failed.</summary>
+    private async Task<bool> SaveAsAsync(bool flatten, string nameSuffix)
     {
         var picker = new FileSavePicker();
         InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
 
         picker.FileTypeChoices.Add("Documento PDF", new List<string> { ".pdf" });
         picker.SuggestedFileName = ViewModel.DocumentTitle is { } title
-            ? $"{Path.GetFileNameWithoutExtension(title)}-compilato"
-            : "documento-compilato";
+            ? $"{Path.GetFileNameWithoutExtension(title)}-{nameSuffix}"
+            : $"documento-{nameSuffix}";
 
         var file = await picker.PickSaveFileAsync();
         if (file is null)
         {
-            return;
+            return false;
         }
 
-        var flatten = ViewModel.FlattenBeforeSave;
         var saved = await ViewModel.SaveFilledFormAsync(file.Path, flatten);
         // When flatten is true, SaveFilledFormAsync already sets its own status message
         // (the panel/filler get torn down at the same time) - do not overwrite it here.
@@ -469,5 +514,141 @@ public sealed partial class MainWindow : Window
         {
             ViewModel.InfoMessage = $"Salvato in {file.Path}";
         }
+
+        return saved;
+    }
+
+    // ---- unsaved changes ---------------------------------------------------------------
+
+    /// <summary>
+    /// True if it is fine to replace or close the document: it has no unsaved changes, or the
+    /// user saved them, or chose to drop them. False if they cancelled (or the save did not happen).
+    /// </summary>
+    private async Task<bool> ConfirmLeavingDocumentAsync()
+    {
+        if (!ViewModel.HasUnsavedChanges)
+        {
+            return true;
+        }
+
+        var dialog = new ContentDialog
+        {
+            XamlRoot = Content.XamlRoot,
+            Title = "Modifiche non salvate",
+            Content = "Il documento ha modifiche (annotazioni o campi compilati) che non sono state salvate. Il file originale non viene mai modificato: per tenerle vanno salvate in un nuovo file.",
+            PrimaryButtonText = "Salva con nome...",
+            SecondaryButtonText = "Non salvare",
+            CloseButtonText = "Annulla",
+            DefaultButton = ContentDialogButton.Primary,
+        };
+
+        return await dialog.ShowAsync() switch
+        {
+            ContentDialogResult.Primary => await SaveAsAsync(flatten: false, "modificato"),
+            ContentDialogResult.Secondary => true,
+            _ => false,
+        };
+    }
+
+    private async void OnAppWindowClosing(Microsoft.UI.Windowing.AppWindow sender, Microsoft.UI.Windowing.AppWindowClosingEventArgs args)
+    {
+        if (_closeConfirmed || !ViewModel.HasUnsavedChanges)
+        {
+            return;
+        }
+
+        // The dialog is asynchronous, so hold the window open now and close it again once the user has decided.
+        args.Cancel = true;
+        if (await ConfirmLeavingDocumentAsync())
+        {
+            _closeConfirmed = true;
+            Close();
+        }
+    }
+
+    // ---- notes and stamps --------------------------------------------------------------
+
+    private void OnStampPresetClicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: TextStampPreset preset })
+        {
+            ViewModel.BeginTextStamp(preset);
+        }
+    }
+
+    private async void OnPickStampImageClicked(object sender, RoutedEventArgs e)
+    {
+        var picker = new FileOpenPicker();
+        InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
+        foreach (var extension in new[] { ".png", ".jpg", ".jpeg", ".bmp", ".gif" })
+        {
+            picker.FileTypeFilter.Add(extension);
+        }
+
+        picker.SuggestedStartLocation = PickerLocationId.PicturesLibrary;
+        var file = await picker.PickSingleFileAsync();
+        if (file is null)
+        {
+            return;
+        }
+
+        try
+        {
+            ViewModel.BeginImageStamp(await DecodeStampImageAsync(file));
+        }
+        catch (Exception ex)
+        {
+            ViewModel.StatusMessage = $"Impossibile leggere l'immagine: {ex.Message}";
+        }
+    }
+
+    /// <summary>Decodes an image file to straight-alpha BGRA, scaled down so its longer side is at most 2000 px - a stamp is a few centimeters wide, and a 40-megapixel photo would bloat the file for nothing.</summary>
+    private static async Task<ImageStampData> DecodeStampImageAsync(StorageFile file)
+    {
+        const double maxSide = 2000;
+        using var stream = await file.OpenReadAsync();
+        var decoder = await BitmapDecoder.CreateAsync(stream);
+        var scale = Math.Min(1.0, maxSide / Math.Max(decoder.PixelWidth, decoder.PixelHeight));
+        var transform = new BitmapTransform
+        {
+            ScaledWidth = (uint)Math.Max(1, Math.Round(decoder.PixelWidth * scale)),
+            ScaledHeight = (uint)Math.Max(1, Math.Round(decoder.PixelHeight * scale)),
+        };
+
+        var pixels = await decoder.GetPixelDataAsync(
+            BitmapPixelFormat.Bgra8, BitmapAlphaMode.Straight, transform, ExifOrientationMode.IgnoreExifOrientation, ColorManagementMode.DoNotColorManage);
+        return new ImageStampData(pixels.DetachPixelData(), (int)transform.ScaledWidth, (int)transform.ScaledHeight, file.Name);
+    }
+
+    private void OnEscapeInvoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
+    {
+        if (ViewModel.IsPlacingAnnotation)
+        {
+            ViewModel.CancelAnnotationTool();
+            args.Handled = true;
+        }
+        else if (ViewModel.SelectedAnnotation is not null)
+        {
+            ViewModel.SelectAnnotation(null);
+            args.Handled = true;
+        }
+    }
+
+    private void OnPagesPointerPressed(object sender, PointerRoutedEventArgs e)
+    {
+        if (ViewModel.SelectedAnnotation is null)
+        {
+            return;
+        }
+
+        for (var element = e.OriginalSource as DependencyObject; element is not null; element = VisualTreeHelper.GetParent(element))
+        {
+            if (element is FrameworkElement { Tag: PageAnnotationViewModel })
+            {
+                return; // on an annotation (or its handle): that has its own say
+            }
+        }
+
+        ViewModel.SelectAnnotation(null);
     }
 }

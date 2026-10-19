@@ -23,7 +23,7 @@
                    Text="Visualizzatore, editor e compilatore di moduli PDF nativo per Windows 10 e 11." />
 
         <TextBlock TextWrapping="Wrap" Opacity="0.7" FontSize="12"
-                   Text="Componenti di terze parti: PDFium (bblanchon.PDFium.Win32, Apache-2.0), CommunityToolkit.Mvvm (MIT), System.Security.Cryptography.Pkcs (MIT)." />
+                   Text="Componenti di terze parti: PDFium (bblanchon.PDFium.Win32, Apache-2.0), CommunityToolkit.Mvvm (MIT), System.Security.Cryptography.Pkcs (MIT), iText Core (AGPL-3.0)." />
 
         <TextBlock x:Name="CopyrightText" Opacity="0.6" FontSize="12" />
 

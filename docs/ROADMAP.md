@@ -23,8 +23,9 @@
 - [x] Navigazione dall'indice (bookmark, `FPDFBookmark_*`): albero nella barra laterale sinistra, al posto delle miniature (mai insieme) - vedi docs/ARCHITECTURE.md "Indice (bookmark)"
 - [ ] Virtualizzazione reale del viewport (oggi ogni pagina viene comunque renderizzata e tenuta in memoria, solo in modo progressivo/asincrono - per documenti molto grandi serebbe da scaricare/saltare le pagine lontane dallo scroll corrente)
 - [x] Versionamento (`Directory.Build.props`, un solo `<Version>` per tutti i progetti) e finestra "Informazioni" (`AboutDialog`: versione, breve descrizione, licenze di terze parti)
-- [x] Cerca e Compila modulo spostati nella barra laterale sinistra, condivisa con le miniature (sovrapposti quando più di uno è attivo insieme) - Precedente/Successivo **pagina** restano nella barra in alto, solo Precedente/Successivo **risultato di ricerca** si sono spostati; la barra di stato della ricerca mostra ora anche il numero totale di ricorrenze, non solo le pagine - vedi docs/ARCHITECTURE.md "Barra laterale sinistra"
-- [x] Indicazione PDF/A nella barra di stato ("PDF/A-2B"/"Non PDF/A") e, per i documenti PDF/A, in un banner informativo sopra le pagine - autodichiarazione letta dai metadati XMP del file (`PdfEngine.PdfAConformance`), non una validazione completa - vedi docs/ARCHITECTURE.md "Indicazione PDF/A nella barra di stato"
+- [x] "Recenti" (pannello della barra laterale; ultimi 10 documenti, anche URL; si aggiorna a ogni apertura riuscita, toglie da solo le voci il cui file non esiste più) - vedi docs/ARCHITECTURE.md "File recenti"
+- [x] Cerca e Compila modulo spostati nella barra laterale sinistra, condivisa con le miniature (in origine sovrapposti; ora **un solo pannello alla volta**, tutti e sei: Miniature, Indice, Strumenti, Compila modulo, Cerca, Recenti) - Precedente/Successivo **pagina** restano nella barra in alto, solo Precedente/Successivo **risultato di ricerca** si sono spostati; la barra di stato della ricerca mostra ora anche il numero totale di ricorrenze, non solo le pagine - vedi docs/ARCHITECTURE.md "Barra laterale sinistra"
+- [x] Indicazione PDF/A nella barra di stato ("PDF/A-2B", solo per i documenti che lo dichiarano) e in un banner informativo sopra le pagine - autodichiarazione letta dai metadati XMP del file (`PdfEngine.PdfAConformance`), non una validazione completa - vedi docs/ARCHITECTURE.md "Indicazione PDF/A nella barra di stato"
 - [x] Firme digitali: banner sopra le pagine e indicazione nella barra di stato (integra / modificata dopo la firma / non valida / non verificabile) - controllo dell'**integrità** del contenuto firmato, non dell'attendibilità del certificato - vedi docs/ARCHITECTURE.md "Firme digitali"
 - [ ] Firme digitali: validazione del certificato (catena fino a una radice attendibile, scadenza, revoca) e formati non ancora coperti (`adbe.pkcs7.sha1`, `adbe.x509.rsa_sha1`, marche temporali `DocTimeStamp`); elenco dettagliato delle firme (pannello)
 
@@ -38,6 +39,10 @@
 - [x] UI applicativa per la compilazione moduli: pannello "Compila modulo" (`SplitView`), un controllo per campo (`TextBox`/`CheckBox`/sola lettura per gli altri tipi), rendering live del campo appena modificato (`FPDF_FFLDraw`), "Salva con nome..." con flatten opzionale. Tre bug reali trovati testando dal vivo con screenshot/click simulati (rendering che non si aggiornava, valore "vecchio" scritto per una race sul binding, crash nativo appiattendo con l'ambiente form-fill ancora attivo) - vedi docs/ARCHITECTURE.md "Pannello Compila modulo"
 - [x] Combo box e list box: voci lette da PDFium e selezionabili dal pannello (`SetComboSelectionAndRender`/`SetListSelectionAndRender`, entrambi via `FORM_SetIndexSelected`). Il percorso testuale provato all'inizio funzionava solo per la prima scelta di un combo vuoto e ignorava ogni cambio successivo; `FORM_SetIndexSelected` da sola *aggiunge* alla selezione di una lista multipla, quindi le altre voci vengono deselezionate prima. Coperti da test con `Fixtures/form-choices.pdf`
 - [ ] Salvataggio senza "Unisci": il valore è corretto riaprendo il file, ma l'aspetto dei campi non viene rigenerato (un render senza livello moduli mostra i campi vuoti, anche quelli di testo). Da decidere: unire sempre, oppure chiedere ai lettori di rigenerare l'aspetto (`NeedAppearances`)
+- [ ] Metadati dei file salvati: oggi il salvataggio (PDFium, `FPDF_SaveAsCopy`) conserva quelli del documento originale (**salvo quando si sono aggiunti campi modulo: iText scrive il proprio Producer, "iText Core ... (AGPL version)"**), quindi un modulo prodotto da un altro software (es. GemBox.Pdf) resta con il suo Producer anche dopo essere stato compilato e salvato con PDF26. Da valutare: impostare un proprio Producer (es. "PDF26 <versione>") e la data di modifica - ma l'API pubblica di PDFium ha solo `FPDF_GetMetaText` (lettura, verificato in `fpdf_doc.h`) e nessun setter: servirebbe riscrivere il dizionario Info a livello di file, non con un semplice binding. Va deciso anche se sovrascrivere o preservare il Producer originale
+- [x] Aggiungere campi di testo e caselle di controllo compilabili (pannello "Strumenti" > "Campi modulo"): si piazzano sulla pagina, si spostano, ridimensionano, rinominano, si eliminano, e si scrivono nel file al "Salva con nome..." (il file salvato si riapre con i campi già compilabili). Scritti con iText (AGPL) - vedi docs/ARCHITECTURE.md "Campi modulo creati dall'utente"
+- [ ] Modificare i campi che il documento aveva già (spostare, ridimensionare, rinominare, eliminare): lo scrittore (`PdfFormDesigner.Apply`, `ModifyFieldChange`/`RemoveFieldChange`) lo sa già fare ed è testato; manca l'interfaccia, perché un campo esistente spostato continuerebbe a comparire nella vecchia posizione finché non si salva (il suo disegno è nel bitmap della pagina). Da risolvere nascondendolo temporaneamente, o ricaricando il documento a ogni modifica
+- [ ] Altri tipi di campo (pulsanti di scelta, caselle combinate, elenchi) e proprietà avanzate dei campi di testo (valore predefinito, allineamento, bordo e sfondo)
 - [ ] Fixture di test AcroForm per `PdfEngine.Tests`: c'è `Fixtures/form-choices.pdf` (combo e liste, generata a mano); mancano ancora campi di testo, checkbox e radio (oggi verificati a mano contro documenti reali non inclusi nel repo)
 
 ## Stampa
@@ -45,8 +50,8 @@
 - [ ] Anteprima di stampa nel dialogo - **posticipata**. Percorso individuato: stampa nativa Windows (`PrintManagerInterop` + `Microsoft.UI.Xaml.Printing.PrintDocument`, entrambi presenti in Windows App SDK 2.3.1 - la nota in ARCHITECTURE.md "Stampa: perché non l'API di stampa WinRT" è superata). Prima di iniziare: prova rapida (2-4 h) che il pannello si apra da app WinUI3 non pacchettizzata. Da sistemare comunque, con o senza anteprima: la stampa GDI tiene pinnati i buffer di tutte le pagine per l'intero lavoro (~139 MB/pagina A4 a 600 dpi) e stira la pagina sull'intero foglio ignorando margini e proporzioni
 
 ## M3 - Editor / annotazioni avanzate
-- [ ] Nota/testo libero, disegno a mano libera (ink), timbro
-- [ ] Editing di testo/immagini esistenti nella pagina (fuori scope M0-M2; da valutare se resti su PDFium o richieda una libreria aggiuntiva)
+- [x] Nota e timbro (testuale con data opzionale, o immagine dell'utente): pannello laterale "Strumenti" (pulsante in barra) + "Salva con nome...", selezione/spostamento/ridimensionamento/eliminazione sulla pagina, avviso di modifiche non salvate - vedi docs/ARCHITECTURE.md "Annotazioni: note e timbri"
+- [ ] Editing di testo/immagini esistenti nella pagina. **Prova di fattibilità fatta** (docs/ARCHITECTURE.md "Annotazioni", ultima sezione): PDFium può sostituire il testo di un oggetto testo, ma solo con i glifi già presenti nel font incorporato (su un documento reale i caratteri mancanti diventano riquadri vuoti) e non esiste alcun riflusso; resta da decidere se accontentarsi di una sostituzione con font di ripiego o aggiungere una libreria
 - [ ] Undo/redo sulle modifiche
 
 ## M4 - Distribuzione
@@ -58,6 +63,8 @@ non a livello di installer - scelta esplicita dell'utente invece di una registra
 silenziosa all'installazione.
 
 ## Backlog / non pianificato
+- Testo libero (annotazione di testo scritta direttamente sulla pagina) - spostato da M3
+- Disegno a mano libera (ink) - spostato da M3
 - Supporto XFA (fuori scope per scelta di progetto)
 - Cloud storage autenticato (OneDrive/SharePoint/Google Drive) per l'apertura da riga di comando - oggi si supportano solo URL HTTP/HTTPS pubblici
 - Firma digitale con certificato (PKI)

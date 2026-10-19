@@ -30,6 +30,33 @@ public partial class PdfPageViewModel : ObservableObject
 
     public int Index { get; }
 
+    /// <summary>The view model this page belongs to - the annotation layer talks to it directly (tool state, selection, edits).</summary>
+    public MainViewModel Owner => _owner;
+
+    /// <summary>
+    /// The notes and stamps on this page, in annotation-list order - drawn and made interactive by
+    /// <c>PdfAnnotationLayer</c>. Replaced wholesale (never edited in place) by
+    /// <see cref="SetAnnotations"/>, which raises <see cref="AnnotationsChanged"/> once.
+    /// </summary>
+    public IReadOnlyList<PageAnnotationViewModel> Annotations { get; private set; } = Array.Empty<PageAnnotationViewModel>();
+
+    /// <summary>Form fields the user placed on this page that the document does not have yet; drawn by the same layer as <see cref="Annotations"/>.</summary>
+    public IReadOnlyList<PageAnnotationViewModel> DesignFields { get; private set; } = Array.Empty<PageAnnotationViewModel>();
+
+    public void SetDesignFields(IReadOnlyList<PageAnnotationViewModel> items)
+    {
+        DesignFields = items;
+        AnnotationsChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    public event EventHandler? AnnotationsChanged;
+
+    public void SetAnnotations(IEnumerable<PdfEngine.Annotations.PdfAnnotationInfo> infos)
+    {
+        Annotations = infos.Select(info => new PageAnnotationViewModel(this, info)).ToList();
+        AnnotationsChanged?.Invoke(this, EventArgs.Empty);
+    }
+
     /// <summary>Page size in PDF points (zoom-independent), kept so <see cref="Resize"/> never needs to touch PDFium.</summary>
     public double PointWidth { get; }
 

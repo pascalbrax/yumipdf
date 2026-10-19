@@ -9,9 +9,15 @@
     mc:Ignorable="d">
 
     <Grid RowDefinitions="Auto,*,Auto">
+        <Grid.KeyboardAccelerators>
+            <!-- Esc ends a placement tool, or else clears the selected annotation - and does nothing (not even "handled") otherwise. -->
+            <KeyboardAccelerator Key="Escape" Invoked="OnEscapeInvoked" />
+        </Grid.KeyboardAccelerators>
 
         <CommandBar Grid.Row="0" DefaultLabelPosition="Right">
             <AppBarButton Icon="OpenFile" Label="Apri..." Click="OnOpenClicked" />
+            <!-- Recent documents: a sidebar panel (like Miniature, Indice, Strumenti, Compila modulo and Cerca, it excludes the others). -->
+            <AppBarToggleButton Icon="Clock" Label="Recenti" IsChecked="{x:Bind ViewModel.IsRecentPanelOpen, Mode=TwoWay}" />
             <AppBarButton Icon="Print" Label="Stampa..." Click="OnPrintClicked" />
             <AppBarSeparator />
             <AppBarButton Icon="Back" Label="Precedente" Command="{x:Bind ViewModel.PreviousPageCommand}" />
@@ -31,6 +37,16 @@
                                  Visibility="{x:Bind ViewModel.BookmarkButtonVisibility, Mode=OneWay}" />
             <AppBarToggleButton Icon="Edit" Label="Compila modulo" IsChecked="{x:Bind ViewModel.IsFormPanelOpen, Mode=TwoWay}"
                                  Visibility="{x:Bind ViewModel.FormButtonVisibility, Mode=OneWay}" />
+            <AppBarSeparator />
+            <!--
+                "Strumenti" opens the sidebar panel with the notes and stamps to place on the page
+                (the tools themselves live there, not on the toolbar). "Salva con nome..." writes
+                the document, annotations included, to a new file.
+            -->
+            <AppBarToggleButton Icon="Highlight" Label="Strumenti" IsChecked="{x:Bind ViewModel.IsToolsPanelOpen, Mode=TwoWay}"
+                                 Visibility="{x:Bind ViewModel.DocumentToolsVisibility, Mode=OneWay}" />
+            <AppBarButton Icon="Save" Label="Salva con nome..." Click="OnSaveAsClicked"
+                          Visibility="{x:Bind ViewModel.DocumentToolsVisibility, Mode=OneWay}" />
             <AppBarSeparator />
             <!-- Ctrl+F works from anywhere in the window - a KeyboardAccelerator bubbles up regardless of which control currently has focus. -->
             <AppBarToggleButton x:Name="SearchToggle" Icon="Find" Label="Cerca" IsChecked="{x:Bind ViewModel.IsSearchOpen, Mode=TwoWay}">
@@ -92,11 +108,118 @@
                     </TreeView>
 
                     <!--
+                        Strumenti: notes and stamps to place on the page. Opaque, like the Compila modulo
+                        panel, so whatever is under it (thumbnails) does not show through; its top inset
+                        follows the Cerca bar (OnSearchBarSizeChanged), same as the index.
+                    -->
+                    <ScrollViewer x:Name="ToolsPanel" Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+                                  VerticalScrollBarVisibility="Auto"
+                                  Visibility="{x:Bind ViewModel.IsToolsPaneOpen, Mode=OneWay}">
+                        <StackPanel Padding="16,12,16,16" Spacing="20">
+                            <TextBlock Text="Strumenti" Style="{StaticResource SubtitleTextBlockStyle}" />
+
+                            <StackPanel Spacing="8">
+                                <TextBlock Text="Note" FontSize="12" Opacity="0.7" />
+                                <ToggleButton HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+                                              AutomationProperties.Name="Aggiungi una nota"
+                                              IsChecked="{x:Bind ViewModel.IsNoteToolActive, Mode=TwoWay}"
+                                              ToolTipService.ToolTip="Poi fai clic sulla pagina per inserirla (Esc per annullare)">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <SymbolIcon Symbol="Comment" />
+                                        <TextBlock Text="Aggiungi una nota" VerticalAlignment="Center" />
+                                    </StackPanel>
+                                </ToggleButton>
+                            </StackPanel>
+
+                            <StackPanel Spacing="8">
+                                <TextBlock Text="Timbri" FontSize="12" Opacity="0.7" />
+                                <ItemsControl ItemsSource="{x:Bind vm:MainViewModel.TextStampPresets}" IsTabStop="False">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <StackPanel Spacing="4" />
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate x:DataType="vm:TextStampPreset">
+                                            <Button HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+                                                    Tag="{x:Bind}" Click="OnStampPresetClicked"
+                                                    Foreground="{x:Bind TextBrush}" FontWeight="SemiBold" Content="{x:Bind Text}"
+                                                    ToolTipService.ToolTip="Poi fai clic sulla pagina per inserirlo (Esc per annullare)" />
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                                <CheckBox Content="Aggiungi la data" IsChecked="{x:Bind ViewModel.AddDateToStamps, Mode=TwoWay}" />
+                                <Button HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Click="OnPickStampImageClicked"
+                                        AutomationProperties.Name="Timbro con un'immagine">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <SymbolIcon Symbol="Pictures" />
+                                        <TextBlock Text="Immagine..." VerticalAlignment="Center" />
+                                    </StackPanel>
+                                </Button>
+                            </StackPanel>
+
+                            <StackPanel Spacing="8">
+                                <TextBlock Text="Campi modulo" FontSize="12" Opacity="0.7" />
+                                <ToggleButton HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+                                              AutomationProperties.Name="Aggiungi un campo di testo"
+                                              IsChecked="{x:Bind ViewModel.IsTextFieldToolActive, Mode=TwoWay}"
+                                              ToolTipService.ToolTip="Poi fai clic sulla pagina per inserirlo (Esc per annullare)">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <SymbolIcon Symbol="Font" />
+                                        <TextBlock Text="Campo di testo" VerticalAlignment="Center" />
+                                    </StackPanel>
+                                </ToggleButton>
+                                <ToggleButton HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+                                              AutomationProperties.Name="Aggiungi una casella di controllo"
+                                              IsChecked="{x:Bind ViewModel.IsCheckBoxFieldToolActive, Mode=TwoWay}"
+                                              ToolTipService.ToolTip="Poi fai clic sulla pagina per inserirla (Esc per annullare)">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <SymbolIcon Symbol="Accept" />
+                                        <TextBlock Text="Casella di controllo" VerticalAlignment="Center" />
+                                    </StackPanel>
+                                </ToggleButton>
+                                <TextBlock TextWrapping="Wrap" FontSize="11" Opacity="0.7"
+                                           Text="I campi vengono scritti nel file quando lo salvi con &quot;Salva con nome...&quot;: il documento salvato si riapre con i campi già compilabili." />
+                            </StackPanel>
+                        </StackPanel>
+                    </ScrollViewer>
+
+                    <!--
+                        Recenti: the documents opened last, newest first. A click opens one (and closes
+                        the panel); the cross removes it from the list; "Svuota elenco" empties it.
+                    -->
+                    <Grid x:Name="RecentPanel" RowDefinitions="Auto,*,Auto" Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+                          Visibility="{x:Bind ViewModel.IsRecentPanelOpen, Mode=OneWay}">
+                        <TextBlock Text="File recenti" Style="{StaticResource SubtitleTextBlockStyle}" Margin="16,12,16,8" />
+                        <ListView Grid.Row="1" ItemsSource="{x:Bind ViewModel.RecentEntries}" SelectionMode="None"
+                                  IsItemClickEnabled="True" ItemClick="OnRecentEntryClicked">
+                            <ListView.ItemTemplate>
+                                <DataTemplate x:DataType="vm:RecentFileEntry">
+                                    <Grid ColumnDefinitions="*,Auto" Padding="4,6" ToolTipService.ToolTip="{x:Bind Path}">
+                                        <StackPanel>
+                                            <TextBlock Text="{x:Bind Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                            <TextBlock Text="{x:Bind Folder}" FontSize="11" Opacity="0.65" TextTrimming="CharacterEllipsis" />
+                                        </StackPanel>
+                                        <Button Grid.Column="1" Tag="{x:Bind}" Click="OnRemoveRecentClicked" VerticalAlignment="Center"
+                                                Background="Transparent" BorderThickness="0" Padding="6"
+                                                AutomationProperties.Name="Rimuovi dall'elenco" ToolTipService.ToolTip="Rimuovi dall'elenco">
+                                            <FontIcon Glyph="&#xE711;" FontSize="10" />
+                                        </Button>
+                                    </Grid>
+                                </DataTemplate>
+                            </ListView.ItemTemplate>
+                        </ListView>
+                        <TextBlock Grid.Row="1" Text="Nessun file recente" Opacity="0.6" Margin="16,8"
+                                   Visibility="{x:Bind ViewModel.HasNoRecentFiles, Mode=OneWay}" />
+                        <Button Grid.Row="2" Content="Svuota elenco" Margin="16" HorizontalAlignment="Stretch" Click="OnClearRecentClicked" />
+                    </Grid>
+
+                    <!--
                         Cerca: fascia in alto, sovrapposta alle miniature se entrambe attive -
                         stesso sfondo/bordo che aveva sopra l'area pagine, ma in verticale: qui
                         la barra è molto più stretta di quanto non fosse sopra il documento.
                     -->
-                    <Border x:Name="SearchBar" VerticalAlignment="Top" HorizontalAlignment="Stretch" SizeChanged="OnSearchBarSizeChanged"
+                    <Border x:Name="SearchBar" VerticalAlignment="Top" HorizontalAlignment="Stretch"
                             Background="{ThemeResource LayerFillColorDefaultBrush}"
                             BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="0,0,0,1"
                             Padding="12,8" Visibility="{x:Bind ViewModel.IsSearchOpen, Mode=OneWay}">
@@ -118,7 +241,7 @@
                         di quanto lascerebbero le miniature o Cerca sotto) - sovrapposto a
                         entrambi per lo stesso motivo.
                     -->
-                    <Grid RowDefinitions="Auto,*,Auto" Background="{ThemeResource LayerFillColorDefaultBrush}"
+                    <Grid RowDefinitions="Auto,*,Auto" Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
                           Visibility="{x:Bind ViewModel.IsFormPanelOpen, Mode=OneWay}">
 
                         <StackPanel Grid.Row="0" Orientation="Horizontal" Padding="16,12" Spacing="8">
@@ -381,6 +504,16 @@
                                         </ItemsControl>
 
                                         <!--
+                                            Notes and stamps on this page: selectable, movable,
+                                            resizable, deletable (PdfAnnotationLayer), and the click
+                                            target while a placement tool is active. Above the
+                                            field overlays so a stamp placed over a field is the
+                                            thing a click lands on.
+                                        -->
+                                        <local:PdfAnnotationLayer Page="{x:Bind}"
+                                                                   Width="{x:Bind PixelWidth, Mode=OneWay}" Height="{x:Bind PixelHeight, Mode=OneWay}" />
+
+                                        <!--
                                             Search-result highlights: purely a screen overlay,
                                             drawn the same way as the field overlays above but
                                             never written into the PDF - see PdfPageViewModel.
@@ -454,10 +587,9 @@
             <TextBlock Text="{x:Bind ViewModel.DocumentTitle, Mode=OneWay}" VerticalAlignment="Center" />
             <!--
                 "PDF/A-2B" (etc.) once the open document's own XMP metadata claims conformance,
-                "Non PDF/A" once the scan found no such claim - never an independently verified
+                nothing at all for a document that does not - never an independently verified
                 result (see PdfEngine.PdfAConformance's remarks). Opacity only, no color coding:
-                this is informational, not a warning - a document simply not being PDF/A is not
-                an error.
+                this is informational, not a warning.
             -->
             <TextBlock Text="{x:Bind ViewModel.PdfAStatusText, Mode=OneWay}" VerticalAlignment="Center" Opacity="0.7" />
             <!-- Digital signatures: shown only for a signed document; the icon's color says how it stands (green intact, amber changed/unverifiable, red invalid). -->
@@ -475,6 +607,10 @@
                          Visibility="{x:Bind ViewModel.ProgressVisibility, Mode=OneWay}"
                          IsIndeterminate="{x:Bind ViewModel.IsProgressIndeterminate, Mode=OneWay}"
                          Minimum="0" Maximum="100" Value="{x:Bind ViewModel.ProgressPercent, Mode=OneWay}" />
+            <TextBlock Text="{x:Bind ViewModel.AnnotationHint, Mode=OneWay}" VerticalAlignment="Center" FontWeight="SemiBold" />
+            <TextBlock Text="&#x25CF; Modifiche non salvate" VerticalAlignment="Center"
+                       Foreground="{ThemeResource SystemFillColorCautionBrush}"
+                       Visibility="{x:Bind ViewModel.HasUnsavedChanges, Mode=OneWay}" />
             <TextBlock Text="{x:Bind ViewModel.StatusMessage, Mode=OneWay}" Foreground="{ThemeResource SystemFillColorCriticalBrush}" VerticalAlignment="Center" />
             <TextBlock Text="{x:Bind ViewModel.InfoMessage, Mode=OneWay}" VerticalAlignment="Center" />
         </StackPanel>
