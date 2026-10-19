@@ -592,6 +592,8 @@
                 this is informational, not a warning.
             -->
             <TextBlock Text="{x:Bind ViewModel.PdfAStatusText, Mode=OneWay}" VerticalAlignment="Center" Opacity="0.7" />
+            <!-- OCR: "OCR in corso: 3/12 pagine" while the background pass runs, "OCR eseguito su 12 pagine" afterwards; empty for a document with its own text. -->
+            <TextBlock Text="{x:Bind ViewModel.OcrStatusText, Mode=OneWay}" VerticalAlignment="Center" Opacity="0.7" />
             <!-- Digital signatures: shown only for a signed document; the icon's color says how it stands (green intact, amber changed/unverifiable, red invalid). -->
             <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center"
                         Visibility="{x:Bind ViewModel.SignatureStatusVisibility, Mode=OneWay}">

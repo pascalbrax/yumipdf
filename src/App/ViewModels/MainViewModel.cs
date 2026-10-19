@@ -52,6 +52,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private Task _textIndexTask = Task.CompletedTask;
     private Task _ocrLoop = Task.CompletedTask;
     private bool _ocrLoopActive;
+
+    /// <summary>How many pages the native text pass found without text and queued for OCR (0 for a document that needs none).</summary>
+    private int _ocrQueuedCount;
     private OcrService? _ocrService;
     private bool _ocrServiceAttempted;
     private List<int> _searchMatchPages = new();
@@ -108,6 +111,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// </summary>
     [ObservableProperty]
     public partial string? PdfAStatusText { get; set; }
+
+    /// <summary>
+    /// Status bar note about OCR: "OCR in corso: 3/12 pagine" while the background pass runs,
+    /// "OCR eseguito su 12 pagine" once it is done; null for a document that has text of its own
+    /// (no OCR was needed) and while no document is open.
+    /// </summary>
+    [ObservableProperty]
+    public partial string? OcrStatusText { get; set; }
 
     /// <summary>Shown in the status bar in an error color - reserve for actual failures, not confirmations (see <see cref="InfoMessage"/>).</summary>
     [ObservableProperty]
@@ -240,6 +251,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
             _pageText.Clear();
             _ocrWords.Clear();
             _ocrPending.Clear();
+            _ocrQueuedCount = 0;
+            OcrStatusText = null;
             _searchMatchPages.Clear();
             _searchMatchPosition = -1;
             _lastHighlightedPageIndex = -1;
@@ -547,6 +560,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
     }
 
     public PdfDocument? Document => _document;
+
+    /// <summary>Raised just before a zoom change resizes the pages already on screen, while they still have their old size: the view notes which part of the document it is showing.</summary>
+    public event Action? PagesResizing;
+
+    /// <summary>Raised right after the pages took their new size: the view puts that same part of the document back in front of the user.</summary>
+    public event Action? PagesResized;
 
     // ---- Form filling (M2) --------------------------------------------------------------
 
@@ -915,10 +934,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
             // already has, stretched via Stretch="Fill" - updates instantly, before the
             // background loop below replaces it with a crisp re-render.
             placeholders = Pages.ToList();
+            PagesResizing?.Invoke();
             foreach (var placeholder in placeholders)
             {
                 placeholder.Resize(zoom);
             }
+
+            PagesResized?.Invoke();
         }
         else
         {
@@ -1703,6 +1725,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _pageText.Clear();
         _ocrWords.Clear();
         _ocrPending.Clear();
+        _ocrQueuedCount = 0;
+        OcrStatusText = null;
         ClearHighlights();
 
         _textIndexCts?.Cancel();
@@ -1750,6 +1774,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             }
         }
 
+        _ocrQueuedCount = _ocrPending.Count;
         RefreshSearchMatches(resetPosition: false);
         EnsureOcrLoop();
     }
@@ -1808,6 +1833,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
 
         _ocrLoopActive = true;
+        UpdateOcrStatus(finished: false);
         _ocrLoop = RunOcrLoopAsync(document, _ocrService, cts.Token);
     }
 
@@ -1852,6 +1878,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     _pageText[index] = result.Text;
                     _ocrWords[index] = result.Words;
                     RefreshSearchMatches(resetPosition: false);
+                    UpdateOcrStatus(finished: false);
                 }
                 catch (OperationCanceledException)
                 {
@@ -1866,8 +1893,31 @@ public partial class MainViewModel : ObservableObject, IDisposable
         finally
         {
             _ocrLoopActive = false;
+            if (!token.IsCancellationRequested)
+            {
+                UpdateOcrStatus(finished: true);
+            }
+
             UpdateSearchStatusText();
         }
+    }
+
+    /// <summary>
+    /// Keeps <see cref="OcrStatusText"/> in step with the OCR pass. "Done" counts the pages that
+    /// were actually recognized (<see cref="_ocrWords"/>): a page that failed stays unsearchable
+    /// and is not claimed as OCR'd. A document where no page could be recognized says nothing.
+    /// </summary>
+    private void UpdateOcrStatus(bool finished)
+    {
+        var recognized = _ocrWords.Count;
+        if (finished)
+        {
+            OcrStatusText = recognized == 0 ? null : $"OCR eseguito su {recognized} {(recognized == 1 ? "pagina" : "pagine")}";
+            return;
+        }
+
+        var processed = Math.Max(0, _ocrQueuedCount - _ocrPending.Count);
+        OcrStatusText = $"OCR in corso: {processed}/{_ocrQueuedCount} pagine";
     }
 
     private int? TakeNextPendingOcrPage()

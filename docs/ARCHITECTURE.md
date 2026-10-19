@@ -72,6 +72,15 @@ mentre il re-render vero e proprio procede in background e sostituisce il bitmap
 scatti. Questo path si attiva solo per un refresh zoom sullo stesso documento (`isNewDocument: false`);
 l'apertura di un nuovo documento ricostruisce sempre `Pages` da zero, dato che non c'e' nulla da "fingere".
 
+**Posizione di scorrimento attorno allo zoom.** Il `ScrollViewer` conserva l'offset verticale *in pixel*: se le pagine
+si ingrandiscono, a pagina 30 di 100 lo stesso offset cade a pagina ~24, e `OnPagesViewChanged` leggeva quella
+posizione sbagliata come "pagina corrente" (lo zoom successivo ripartiva da li', accumulando lo scarto).
+Ora `MainViewModel` solleva `PagesResizing` (prima del `Resize`, dimensioni vecchie) e `PagesResized` (dopo);
+`MainWindow` nel primo annota la pagina in cima alla vista e la *frazione* di pagina gia' scorsa, nel secondo
+ricalcola l'offset dalle nuove altezze (24 px di margine, 16 fra le pagine) e lo applica con `UpdateLayout` +
+`ChangeView` senza animazione. Durante lo spostamento la sincronizzazione scorrimento->pagina corrente e' sospesa
+(`ZoomSettleMilliseconds`). Verificato dal vivo su un PDF di 60 pagine: da pagina 30, 3 zoom avanti (125%, 156%, 195%) restano sulla 30 (prima del fix a 125% si vedeva la 24). Non provati: zoom indietro e "Adatta a larghezza/pagina" con la versione corretta.
+
 ## Zoom massimo per documento
 
 Lo stesso documento con pagine molto grandi (formato architettonico, ~40x24 pollici) espone un secondo
@@ -301,6 +310,13 @@ pagine con testo nativo continuano a funzionare. `RecognizeAsync` restituisce si
 testo di pagina già unito da Windows, usato per trovare la pagina) sia l'elenco delle singole parole
 riconosciute con il loro rettangolo in pixel (usato solo per l'evidenziazione a schermo, mai scritto nel
 PDF - la stessa distinzione già fatta sopra per il "sandwich" abbandonato).
+
+**Indicazione nella barra di stato** (`MainViewModel.OcrStatusText`): quando il passaggio nativo trova pagine
+senza testo e l'OCR parte, la barra mostra "OCR in corso: 3/12 pagine" e, a lavoro finito, "OCR eseguito su 12
+pagine" (conta le pagine realmente riconosciute: una pagina che fallisce non viene dichiarata). Un documento
+con testo proprio non mostra nulla; si azzera all'apertura di un altro documento. Se l'OCR non è disponibile
+(nessuna lingua installata) resta il solo messaggio di `InfoMessage`. Provato dal vivo con un PDF di 3 pagine
+scansionate (immagine JPEG con testo): "OCR in corso: 0/3" poi "OCR eseguito su 3 pagine"; un PDF di testo non mostra nulla.
 
 **Aggiornamento del risultato**: ogni pagina OCR completata richiama `RefreshSearchMatches`, quindi i
 risultati di una ricerca già aperta crescono via via che l'OCR avanza; il testo di stato lo dice

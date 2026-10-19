@@ -20,9 +20,17 @@ public sealed partial class MainWindow : Window
     /// <summary>How long after the window itself scrolls the document to a page (an animated scroll) the scroll position is not read back as "the user moved to another page".</summary>
     private const long ProgrammaticScrollGraceMilliseconds = 800;
 
+    /// <summary>Layout of the page list (see MainWindow.xaml): space around the pages and between them, in pixels.</summary>
+    private const double PagePadding = 24;
+    private const double PageSpacing = 16;
+
+    /// <summary>How long after a zoom change the scroll position is not read back as the user's.</summary>
+    private const long ZoomSettleMilliseconds = 500;
+
     private Microsoft.UI.Dispatching.DispatcherQueueTimer? _refitTimer;
     private long _ignoreScrollSyncUntil;
     private bool _syncingFromScroll;
+    private (int Page, double Fraction)? _zoomAnchor;
     private bool _closeConfirmed;
 
     public MainViewModel ViewModel { get; } = new();
@@ -35,6 +43,8 @@ public sealed partial class MainWindow : Window
         WindowIcon.Apply(this);
 
         ViewModel.PropertyChanged += OnViewModelPropertyChanged;
+        ViewModel.PagesResizing += OnPagesResizing;
+        ViewModel.PagesResized += OnPagesResized;
         PagesScrollViewer.ViewChanged += OnPagesViewChanged;
         PagesScrollViewer.SizeChanged += OnPagesViewportSizeChanged;
         ThumbnailStrip.PageActivated += OnThumbnailPageActivated;
@@ -192,11 +202,67 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    /// <summary>
+    /// A zoom change resizes every page, but the scroll viewer keeps its offset in pixels: without this the
+    /// document slides under the user (page 30 at 125% shows page 24 or so), and the scroll handler then
+    /// reads that wrong position as the current page. So: note the page at the top of the view and how far
+    /// into it the view starts (a fraction, which survives the resize)...
+    /// </summary>
+    private void OnPagesResizing()
+    {
+        // The offset is about to move because of the resize, not because the user scrolled.
+        _ignoreScrollSyncUntil = Environment.TickCount64 + ZoomSettleMilliseconds;
+
+        var pages = ViewModel.Pages;
+        if (pages.Count == 0)
+        {
+            _zoomAnchor = null;
+            return;
+        }
+
+        var offset = PagesScrollViewer.VerticalOffset;
+        var top = PagePadding;
+        for (var index = 0; index < pages.Count; index++)
+        {
+            var height = pages[index].PixelHeight;
+            if (offset <= top + height + PageSpacing / 2 || index == pages.Count - 1)
+            {
+                _zoomAnchor = (index, height > 0 ? (offset - top) / height : 0);
+                return;
+            }
+
+            top += height + PageSpacing;
+        }
+    }
+
+    /// <summary>...and once the pages have their new size, scroll to the same page at the same fraction.</summary>
+    private void OnPagesResized()
+    {
+        if (_zoomAnchor is not var (page, fraction) || page >= ViewModel.Pages.Count)
+        {
+            return;
+        }
+
+        _zoomAnchor = null;
+        var top = PagePadding;
+        for (var index = 0; index < page; index++)
+        {
+            top += ViewModel.Pages[index].PixelHeight + PageSpacing;
+        }
+
+        var target = Math.Max(0, top + fraction * ViewModel.Pages[page].PixelHeight);
+
+        // The new extent only exists after a layout pass; before it the scroll viewer would clamp the offset to the old, shorter one.
+        _ignoreScrollSyncUntil = Environment.TickCount64 + ZoomSettleMilliseconds;
+        PagesScrollViewer.UpdateLayout();
+        PagesScrollViewer.ChangeView(null, target, null, disableAnimation: true);
+    }
+
     /// <summary>The page under the middle of the viewport, worked out from the page sizes (pages are laid out top to bottom, 24 px of padding around them and 16 px between them).</summary>
     private int PageAtViewportCenter()
     {
-        const double padding = 24;
-        const double spacing = 16;
+        const double padding = PagePadding;
+        const double spacing = PageSpacing;
 
         var centerLine = PagesScrollViewer.VerticalOffset + PagesScrollViewer.ViewportHeight / 2;
         var top = padding;
