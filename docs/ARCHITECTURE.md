@@ -346,8 +346,60 @@ quello dichiarato dopo nel XAML copre quello prima - non ci sono regole di esclu
 Cerca non chiude Compila modulo, e viceversa.
 
 **Larghezza** (`MainViewModel.LeftPaneWidth`, bindato a `SplitView.OpenPaneLength`): 340px quando Compila
-modulo è la ragione per cui il pannello è aperto (l'elenco dei campi ha bisogno di più spazio), 230px
-altrimenti (miniature/Cerca) - calcolata, non un singolo valore fisso scomodo per uno dei tre usi.
+modulo è la ragione per cui il pannello è aperto (l'elenco dei campi ha bisogno di più spazio), 300px per
+l'Indice, 230px altrimenti (miniature/Cerca) - calcolata, non un singolo valore fisso scomodo per uno dei tre usi.
+
+## Indice (bookmark): nella barra laterale, in alternativa alle miniature
+
+**Engine** (`PdfDocument.GetBookmarks()` → albero di `PdfBookmark`): `FPDFBookmark_GetFirstChild/GetNextSibling/
+GetTitle/GetCount/GetDest/GetAction` + `FPDFAction_GetType/GetDest` + `FPDFDest_GetDestPageIndex`, firme
+verificate contro `fpdf_doc.h` del pacchetto NuGet (`build/native/include/pdfium/`). Lettura completa e
+immediata dell'intero albero (non su espansione): anche l'indice di un libro è qualche migliaio di stringhe,
+e uno snapshot resta valido senza tenere handle PDFium. Dettagli non ovvi:
+- **Destinazione**: una voce porta a una pagina o con `/Dest` diretto o con un'azione `GoTo`; PDFium documenta
+  che l'azione va chiesta solo se manca la destinazione. Altre azioni (URI, Launch, GoToR) non puntano dentro
+  il documento: `PageIndex = -1`, la voce è mostrata ma non navigabile (più sbiadita).
+- **Titolo**: UTF-16LE con terminatore incluso nella lunghezza riportata (due chiamate: lunghezza, poi dati).
+- **Aperto/chiuso**: `FPDFBookmark_GetCount` positivo = voce aperta di default, negativo = chiusa.
+- **Protezione da file malformati**: profondità massima 64, al massimo 100.000 voci, set degli handle già
+  visitati (un outline può rimandare a se stesso) - il risultato è un albero troncato, mai un blocco.
+
+**UI**: un `TreeView` nel `SplitView.Pane` sinistro (stesso pannello di miniature/Cerca/Compila modulo,
+vedi sopra). Miniature e Indice **si escludono a vicenda** (`MainViewModel.IsThumbnailPanelOpen`/
+`IsBookmarkPanelOpen`: attivarne uno disattiva l'altro), su richiesta esplicita dell'utente - diversamente da
+Cerca/Compila modulo, che si sovrappongono. Il pulsante "Indice" compare solo se il documento ha un indice;
+la scelta dell'utente è ricordata tra le sessioni (`AppSettings.BookmarkPanelOpen`) come per le miniature.
+Larghezza 300px quando l'indice è il contenuto (i titoli sono più lunghi di una miniatura). Il clic su una
+voce porta alla pagina (`GoToPage`, lo stesso percorso delle miniature); la freccia espande/comprime senza
+navigare. La barra di Cerca si sovrappone alla parte alta del pannello: l'albero ne segue l'altezza con un
+margine superiore (`OnSearchBarSizeChanged`), così le prime voci non restano nascoste.
+
+**Aspetto dell'indice**: la gerarchia si legge dal carattere, non solo dall'indentazione (`BookmarkNodeViewModel`:
+capitoli di primo livello 14 pt semibold con un po' d'aria sopra e sotto, voci annidate 13 pt normali, dal
+terzo livello leggermente più chiare, voci non navigabili più sbiadite). **La voce corrente è evidenziata**
+(velo del colore d'accento con barretta a sinistra, grassetto): è l'ultima voce, in ordine di documento, che
+inizia alla pagina corrente o prima (`MainViewModel.CurrentBookmark`, ricalcolata a ogni cambio di pagina,
+anche scorrendo a mano). Se si trova dentro un genitore chiuso, i genitori vengono espansi (`IsExpanded`
+bindato in due direzioni alla voce dell'albero) e la voce viene portata in vista (`RevealCurrentBookmark`).
+Una scelta che segue lo scorrimento riapre un genitore che l'utente aveva chiuso a mano, ma solo quando la
+voce corrente cambia, non a ogni pagina.
+
+**Maniglia sul bordo della barra** (`SidebarHandle`, ex `ThumbnailHandle`): apre/chiude qualunque dei due
+contenuti sia attivo - la freccia segue lo stato reale (`‹` con miniature **o** indice aperti, `›` da chiusa;
+prima guardava solo le miniature e restava `›` con l'indice aperto) - ed è visibile se c'è almeno uno dei due.
+Da chiusa riapre l'ultimo dei due che ha chiuso (`_handleReopensBookmarks`), altrimenti le miniature.
+
+**`ScrollToPage` ora allinea la pagina in alto** (`VerticalAlignmentRatio = 0`). Il comportamento di
+default di `StartBringIntoView` scorre solo il minimo per rendere visibile la pagina, cioè **niente** se è già
+interamente sullo schermo: verificato dal vivo, cliccare "Sezione 1.1" non faceva nulla quando la pagina
+era già visibile. Vale anche per Precedente/Successiva e le miniature, che condividono lo stesso percorso.
+
+**Verifica**: test `PdfBookmarkTests` su `Fixtures/bookmarks.pdf` (generato a mano da
+`Fixtures/make_bookmarks_pdf.py`: `/Dest` diretto, azione GoTo, azione URI, voci aperte/chiuse, titolo
+non-ASCII); in app con UI Automation (albero, esclusione reciproca col pulsante Miniature, posizione di
+scorrimento dopo l'invocazione di ogni voce, margine con Cerca aperto) e uno screenshot. Il clic reale del
+mouse sulle voci non è stato provato (UI Automation `Invoke` è un percorso diverso dal clic), né un indice
+molto grande.
 
 ## Selezione del testo (drag-to-select) - solo pagine con testo nativo
 
@@ -465,6 +517,71 @@ un falso negativo accettabile per un'indicazione informativa, non per un validat
 XMP, uno senza) apribili correttamente da PDFium tramite `PdfDocument.OpenFromPath` e corretti
 entrambi via `PdfAConformance.Detect` (vedi `tests/PdfEngine.Tests/PdfAConformanceTests.cs` per i
 casi sulla sola logica di estrazione, in forma attributo e in forma elemento).
+
+**Banner** (`MainViewModel.ApplyPdfAStatus`): oltre alla barra di stato, un documento che dichiara PDF/A
+mostra un `InfoBar` informativo (blu) sopra le pagine - "Documento PDF/A-2B", testo volutamente breve: "Conformità
+dichiarata dal file, non verificata". Sta nello stesso punto del banner delle firme digitali (due
+`InfoBar` impilati in uno `StackPanel`, ciascuno chiudibile e presente solo se ha qualcosa da dire). Per "Non
+PDF/A" **non** c'è banner: è solo l'assenza di una dichiarazione, resta una nota discreta nella barra di
+stato. Provato dal vivo su un PDF/A-2B minimo creato a mano.
+
+## Firme digitali: verifica dell'integrità, non dell'attendibilità
+
+**Cosa si legge e cosa no.** PDFium (`fpdf_signature.h`, API sperimentale ma presente nella libreria) sa solo
+*elencare* le firme: `FPDF_GetSignatureCount/Object`, `FPDFSignatureObj_GetContents/GetByteRange/GetSubFilter/
+GetReason/GetTime` (`PdfDocument.GetSignatures()` → `PdfSignature`). Non verifica nulla. La verifica è nostra
+(`PdfSignatureVerifier`), sui byte grezzi del file come `PdfAConformance`, con `SignedCms` di .NET (pacchetto
+NuGet `System.Security.Cryptography.Pkcs` - non è nel framework condiviso di questo TFM, MIT, aggiunto alle
+licenze di terze parti).
+
+**Cosa dice, e soprattutto cosa NON dice.** Controlla che ciò che è stato firmato sia ancora ciò che c'è nel
+file: l'impronta del contenuto coperto dal `/ByteRange` e la firma su di essa (`CheckSignature(verifySignatureOnly:
+true)`). **Non** valida il certificato: niente catena fino a una radice attendibile, scadenza, revoca. È ciò che
+Acrobat chiama "firma valida" *in più*, e richiede un archivio di fiducia e interrogazioni di rete. Per questo
+ogni testo dell'interfaccia dice "non modificato dopo la firma", mai "firmatario attendibile", e il banner lo
+scrive esplicitamente.
+
+**Esiti** (`PdfSignatureStatus`, per firma e per documento - quello del documento è della firma che copre più file):
+`Intact` (verde), `ChangedAfterSigning` (giallo), `Altered` (rosso), `Unverifiable` (giallo).
+
+**Controlli di forma prima della crittografia.** Il `/ByteRange` deve essere ben formato: coppie in ordine,
+dentro il file, senza sovrapposizioni, e il vuoto fra i primi due pezzi deve essere esattamente una stringa
+`<...>` (la firma stessa) - un intervallo che non descrive "il file meno la firma" non dimostra nulla sul file
+(`Unverifiable`). Il valore `/Contents` è riempito di zeri fino a una dimensione fissa: si taglia al primo valore
+ASN.1 completo (`AsnDecoder.ReadEncodedValue`) prima di darlo a `SignedCms`. Formati supportati:
+`adbe.pkcs7.detached` e `ETSI.CAdES.detached`; gli altri sono `Unverifiable`. Un certificato non incluso nella
+firma o un contenitore illeggibile sono `Unverifiable`; un'impronta o una firma che non tornano sono `Altered`
+(tecnicamente anche un algoritmo non supportato dalla piattaforma finirebbe qui: il testo dice "modificato o
+danneggiato", e non si può distinguere meglio con l'API).
+
+**Il caso che ha richiesto più cura: dati di validazione dopo l'ultima firma.** I servizi di firma qualificata
+(PAdES-LT) aggiungono, *dopo* l'ultima firma, un aggiornamento incrementale con il Document Security Store
+(`/DSS`: certificati, risposte OCSP, CRL) perché la firma sia verificabile anche a certificati scaduti. Il
+file reale usato per sviluppare questa funzione (due firme CAdES) è fatto così: a un confronto ingenuo "la
+firma arriva a fine file?" risulta **modificato dopo la firma** - un falso allarme su ogni documento di quel
+tipo. `IsValidationDataOnly` analizza il codice aggiunto dopo la parte firmata e risponde sì solo se *ogni*
+oggetto aggiunto è: il catalogo, **identico alla sua versione precedente tranne la voce `/DSS`** (se la
+versione precedente non si trova in chiaro, ad esempio perché è in uno stream di oggetti, risponde no); un
+oggetto raggiungibile dal dizionario `/DSS`; o un cross-reference stream. Qualunque altra cosa (una pagina, un
+annotation, un campo, un oggetto non classificabile, un oggetto nascosto nei dati di un altro) dà no, cioè
+`ChangedAfterSigning`. Conservativo di proposito: nel dubbio avvisa. Limite noto: una marca temporale di
+documento (`/Type /DocTimeStamp`, PAdES-LTA) aggiunta dopo l'ultima firma non è riconosciuta e dà
+`ChangedAfterSigning`. Una firma seguita da *un'altra firma* è per definizione "seguita da altro": lo stato per
+firma lo dice, ma lo stato del documento guarda solo l'ultima.
+
+**Interfaccia.** `MainViewModel.ApplySignatureReport`: un `InfoBar` chiudibile sopra le pagine (verde/giallo/
+rosso, titolo, firmatario e data - dal certificato e dall'attributo di data firmata, altrimenti da `/M`) e una
+voce nella barra di stato con icona colorata. Per un documento non firmato non compare nulla. Il file viene
+letto una sola volta (`AnalyzeFile`, insieme al rilevamento PDF/A) e la verifica gira fuori dal thread UI.
+
+**Verifica.** `PdfSignatureTests`: un PDF firmato davvero, costruito nel test con un certificato autofirmato
+usa-e-getta (la firma deve corrispondere ai byte che copre, quindi non può essere una fixture statica) - integro,
+byte alterato, pagina aggiunta dopo, solo dati di validazione dopo, aggiornamento DSS che tocca anche il
+catalogo, formato non supportato - più l'analisi delle date PDF. In app, con un file firmato reale del
+committente (non incluso nel repo) e due sue copie manomesse in cartella temporanea (un byte alterato, un
+oggetto pagina aggiunto in coda): i tre stati hanno mostrato banner e barra di stato attesi. Non provato:
+firme con certificati senza catena, ECDSA, firme PAdES con marca temporale di documento, file molto grandi
+(la verifica copia i byte firmati in memoria: costa quanto il file).
 
 ## Nota sul nome dell'assembly
 

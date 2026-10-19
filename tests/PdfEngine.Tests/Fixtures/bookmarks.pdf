@@ -1,0 +1,61 @@
+%PDF-1.7
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R /Outlines 7 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R 4 0 R 5 0 R 6 0 R] /Count 4 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Resources << >> >>
+endobj
+4 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Resources << >> >>
+endobj
+5 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Resources << >> >>
+endobj
+6 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Resources << >> >>
+endobj
+7 0 obj
+<< /Type /Outlines /First 8 0 R /Last 12 0 R /Count 5 >>
+endobj
+8 0 obj
+<< /Title (Capitolo 1) /Parent 7 0 R /Next 11 0 R /First 9 0 R /Last 10 0 R /Count 2 /Dest [3 0 R /Fit] >>
+endobj
+9 0 obj
+<< /Title (Sezione 1.1) /Parent 8 0 R /Next 10 0 R /Dest [4 0 R /Fit] >>
+endobj
+10 0 obj
+<< /Title (Sezione 1.2) /Parent 8 0 R /Prev 9 0 R /A << /S /GoTo /D [5 0 R /Fit] >> >>
+endobj
+11 0 obj
+<< /Title (Capitolo 2) /Parent 7 0 R /Prev 8 0 R /Next 12 0 R /First 13 0 R /Last 13 0 R /Count -1 /Dest [6 0 R /Fit] >>
+endobj
+12 0 obj
+<< /Title (Sito web) /Parent 7 0 R /Prev 11 0 R /A << /S /URI /URI (https://example.com) >> >>
+endobj
+13 0 obj
+<< /Title <FEFF004300690074007400E00020006500200070006900F9> /Parent 11 0 R /Dest [6 0 R /Fit] >>
+endobj
+xref
+0 14
+0000000000 65535 f 
+0000000009 00000 n 
+0000000074 00000 n 
+0000000149 00000 n 
+0000000237 00000 n 
+0000000325 00000 n 
+0000000413 00000 n 
+0000000501 00000 n 
+0000000573 00000 n 
+0000000695 00000 n 
+0000000783 00000 n 
+0000000886 00000 n 
+0000001023 00000 n 
+0000001134 00000 n 
+trailer
+<< /Size 14 /Root 1 0 R >>
+startxref
+1248
+%%EOF

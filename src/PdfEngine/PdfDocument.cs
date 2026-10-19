@@ -93,6 +93,161 @@ public sealed class PdfDocument : IDisposable
             return new PdfPage(pageHandle, index);
         });
 
+    /// <summary>
+    /// The document's outline as a tree, in document order - empty if it has none. Entries are
+    /// read eagerly (the whole tree, not on expansion): even a large book's outline is a few
+    /// thousand small strings, and a snapshot keeps the result usable after PDFium's own
+    /// handles are gone.
+    /// </summary>
+    public IReadOnlyList<PdfBookmark> GetBookmarks()
+        => PdfiumRuntime.Invoke(() =>
+        {
+            ThrowIfDisposed();
+            var budget = MaxBookmarkEntries;
+            return ReadBookmarkLevel(IntPtr.Zero, depth: 0, ref budget);
+        });
+
+    // A malformed (or hostile) file can make the outline loop back on itself or be absurdly
+    // large; both limits turn that into a truncated tree instead of a hang or a stack overflow.
+    private const int MaxBookmarkDepth = 64;
+    private const int MaxBookmarkEntries = 100_000;
+
+    private List<PdfBookmark> ReadBookmarkLevel(IntPtr parent, int depth, ref int budget)
+    {
+        var result = new List<PdfBookmark>();
+        if (depth >= MaxBookmarkDepth)
+        {
+            return result;
+        }
+
+        var visited = new HashSet<IntPtr>();
+        var node = PdfiumNative.FPDFBookmark_GetFirstChild(_handle, parent);
+        while (node != IntPtr.Zero && budget > 0 && visited.Add(node))
+        {
+            budget--;
+            var children = ReadBookmarkLevel(node, depth + 1, ref budget);
+            result.Add(new PdfBookmark(
+                ReadBookmarkTitle(node),
+                ResolveBookmarkPage(node),
+                IsInitiallyOpen: PdfiumNative.FPDFBookmark_GetCount(node) > 0,
+                children));
+            node = PdfiumNative.FPDFBookmark_GetNextSibling(_handle, node);
+        }
+
+        return result;
+    }
+
+    private static string ReadBookmarkTitle(IntPtr bookmark)
+    {
+        var length = PdfiumNative.FPDFBookmark_GetTitle(bookmark, null, 0);
+        if (length <= 2)
+        {
+            return string.Empty;
+        }
+
+        var buffer = new byte[length];
+        PdfiumNative.FPDFBookmark_GetTitle(bookmark, buffer, length);
+        // The reported length includes the UTF-16 terminator.
+        return System.Text.Encoding.Unicode.GetString(buffer, 0, (int)length - 2);
+    }
+
+    /// <summary>
+    /// An entry leads somewhere either through a direct destination or through a GoTo action
+    /// (PDFium documents that the action is only worth asking for when there is no destination).
+    /// Other actions - URI, Launch, GoToR - do not point inside this document.
+    /// </summary>
+    private int ResolveBookmarkPage(IntPtr bookmark)
+    {
+        var dest = PdfiumNative.FPDFBookmark_GetDest(_handle, bookmark);
+        if (dest == IntPtr.Zero)
+        {
+            var action = PdfiumNative.FPDFBookmark_GetAction(bookmark);
+            if (action == IntPtr.Zero || PdfiumNative.FPDFAction_GetType(action) != PdfiumNative.PDFACTION_GOTO)
+            {
+                return -1;
+            }
+
+            dest = PdfiumNative.FPDFAction_GetDest(_handle, action);
+            if (dest == IntPtr.Zero)
+            {
+                return -1;
+            }
+        }
+
+        return PdfiumNative.FPDFDest_GetDestPageIndex(_handle, dest);
+    }
+
+    /// <summary>
+    /// The document's digital signatures as it declares them, in file order - empty if it has
+    /// none. Only reads them: whether they hold is <see cref="PdfSignatureVerifier"/>'s question.
+    /// </summary>
+    public IReadOnlyList<PdfSignature> GetSignatures()
+        => PdfiumRuntime.Invoke(() =>
+        {
+            ThrowIfDisposed();
+            var count = PdfiumNative.FPDF_GetSignatureCount(_handle);
+            var result = new List<PdfSignature>();
+            for (var index = 0; index < count; index++)
+            {
+                var signature = PdfiumNative.FPDF_GetSignatureObject(_handle, index);
+                if (signature == IntPtr.Zero)
+                {
+                    continue;
+                }
+
+                result.Add(new PdfSignature(
+                    SubFilter: ReadAscii(signature, PdfiumNative.FPDFSignatureObj_GetSubFilter),
+                    Reason: ReadUtf16(signature, PdfiumNative.FPDFSignatureObj_GetReason),
+                    SigningTimeText: ReadAscii(signature, PdfiumNative.FPDFSignatureObj_GetTime),
+                    ByteRange: ReadByteRange(signature),
+                    Contents: ReadBytes(signature, PdfiumNative.FPDFSignatureObj_GetContents)));
+            }
+
+            return result;
+        });
+
+    private delegate uint ByteGetter(IntPtr signature, byte[]? buffer, uint length);
+
+    private static byte[] ReadBytes(IntPtr signature, ByteGetter getter)
+    {
+        var length = getter(signature, null, 0);
+        if (length == 0)
+        {
+            return Array.Empty<byte>();
+        }
+
+        var buffer = new byte[length];
+        getter(signature, buffer, length);
+        return buffer;
+    }
+
+    /// <summary>7-bit ASCII with a trailing NUL (the length counts it) - null for an entry the signature does not have.</summary>
+    private static string? ReadAscii(IntPtr signature, ByteGetter getter)
+    {
+        var bytes = ReadBytes(signature, getter);
+        return bytes.Length > 1 ? System.Text.Encoding.ASCII.GetString(bytes, 0, bytes.Length - 1) : null;
+    }
+
+    /// <summary>UTF-16LE with a trailing NUL (the length counts both bytes of it).</summary>
+    private static string? ReadUtf16(IntPtr signature, ByteGetter getter)
+    {
+        var bytes = ReadBytes(signature, getter);
+        return bytes.Length > 2 ? System.Text.Encoding.Unicode.GetString(bytes, 0, bytes.Length - 2) : null;
+    }
+
+    private static int[] ReadByteRange(IntPtr signature)
+    {
+        var count = PdfiumNative.FPDFSignatureObj_GetByteRange(signature, null, 0);
+        if (count == 0)
+        {
+            return Array.Empty<int>();
+        }
+
+        var buffer = new int[count];
+        PdfiumNative.FPDFSignatureObj_GetByteRange(signature, buffer, count);
+        return buffer;
+    }
+
     /// <summary>Writes the (possibly modified) document to <paramref name="destinationPath"/>.</summary>
     public void SaveAs(string destinationPath, bool removeSecurity = false)
         => PdfiumRuntime.Invoke(() =>

@@ -34,7 +34,7 @@ public sealed partial class MainWindow : Window
         PagesScrollViewer.SizeChanged += OnPagesViewportSizeChanged;
         ThumbnailStrip.PageActivated += OnThumbnailPageActivated;
         ThumbnailStrip.CenterPageChanged += (_, pageIndex) => ViewModel.SetThumbnailFocus(pageIndex);
-        UpdateThumbnailHandleGlyph();
+        UpdateSidebarHandleGlyph();
 
         if (_initialSource is not null)
         {
@@ -84,14 +84,18 @@ public sealed partial class MainWindow : Window
 
             ThumbnailStrip.ScrollToPage(ViewModel.CurrentPageIndex);
         }
+        else if (e.PropertyName == nameof(MainViewModel.CurrentBookmark))
+        {
+            RevealCurrentBookmark();
+        }
         else if (e.PropertyName == nameof(MainViewModel.Thumbnails))
         {
             ThumbnailStrip.SetSource(ViewModel.Thumbnails);
             ThumbnailStrip.ScrollToPage(ViewModel.CurrentPageIndex, animate: false);
         }
-        else if (e.PropertyName == nameof(MainViewModel.IsThumbnailPaneOpen))
+        else if (e.PropertyName is nameof(MainViewModel.IsThumbnailPaneOpen) or nameof(MainViewModel.IsBookmarkPaneOpen))
         {
-            UpdateThumbnailHandleGlyph();
+            UpdateSidebarHandleGlyph();
         }
         else if (e.PropertyName == nameof(MainViewModel.IsSearchOpen) && ViewModel.IsSearchOpen)
         {
@@ -142,7 +146,10 @@ public sealed partial class MainWindow : Window
         if (PagesItemsControl.ContainerFromIndex(index) is FrameworkElement container)
         {
             _ignoreScrollSyncUntil = Environment.TickCount64 + ProgrammaticScrollGraceMilliseconds;
-            container.StartBringIntoView(new BringIntoViewOptions { AnimationDesired = true });
+            // Top-aligned: "go to page N" (index, thumbnails, Precedente/Successiva) should put
+            // the page at the top of the view. The default only scrolls as far as needed to make
+            // it visible, which does nothing at all for a page that is already on screen.
+            container.StartBringIntoView(new BringIntoViewOptions { AnimationDesired = true, VerticalAlignmentRatio = 0.0 });
         }
     }
 
@@ -199,7 +206,58 @@ public sealed partial class MainWindow : Window
         return pages.Count - 1;
     }
 
-    private void OnThumbnailPageActivated(object? sender, int pageIndex)
+    private void OnThumbnailPageActivated(object? sender, int pageIndex) => GoToPage(pageIndex);
+
+    /// <summary>Scrolls the index so the highlighted entry is on screen - it follows the page being read.</summary>
+    private void RevealCurrentBookmark()
+    {
+        if (ViewModel.CurrentBookmark is not { } entry || !ViewModel.IsBookmarkPaneOpen)
+        {
+            return;
+        }
+
+        // Low priority: its ancestors may have just been expanded, and the item only exists once that has been laid out.
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        {
+            var node = FindBookmarkNode(BookmarkTree.RootNodes, entry);
+            if (node is not null && BookmarkTree.ContainerFromNode(node) is TreeViewItem container)
+            {
+                container.StartBringIntoView(new BringIntoViewOptions { AnimationDesired = true });
+            }
+        });
+    }
+
+    private static TreeViewNode? FindBookmarkNode(IList<TreeViewNode> nodes, BookmarkNodeViewModel entry)
+    {
+        foreach (var node in nodes)
+        {
+            if (ReferenceEquals(node.Content, entry))
+            {
+                return node;
+            }
+
+            if (FindBookmarkNode(node.Children, entry) is { } found)
+            {
+                return found;
+            }
+        }
+
+        return null;
+    }
+
+    private void OnBookmarkInvoked(TreeView sender, TreeViewItemInvokedEventArgs args)
+    {
+        if (args.InvokedItem is BookmarkNodeViewModel { CanNavigate: true } node)
+        {
+            GoToPage(node.PageIndex);
+        }
+    }
+
+    /// <summary>Keeps the index clear of the Cerca bar, which overlays the top of the sidebar while it is open (its height is 0 when it is not).</summary>
+    private void OnSearchBarSizeChanged(object sender, SizeChangedEventArgs e)
+        => BookmarkTree.Margin = new Thickness(0, SearchBar.ActualHeight, 0, 0);
+
+    private void GoToPage(int pageIndex)
     {
         if (ViewModel.CurrentPageIndex == pageIndex)
         {
@@ -212,13 +270,35 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private void OnThumbnailHandleClicked(object sender, RoutedEventArgs e)
-        => ViewModel.IsThumbnailPanelOpen = !ViewModel.IsThumbnailPanelOpen;
+    /// <summary>Whether the handle should bring back the index (rather than the thumbnails) the next time it opens the sidebar - whichever it closed last.</summary>
+    private bool _handleReopensBookmarks;
 
-    private void UpdateThumbnailHandleGlyph()
+    private void OnSidebarHandleClicked(object sender, RoutedEventArgs e)
     {
-        // Points at where the strip will go: back to the left edge when it is open, out to the right when closed.
-        ThumbnailHandleGlyph.Glyph = ViewModel.IsThumbnailPaneOpen ? "\uE76B" : "\uE76C";
+        if (ViewModel.IsBookmarkPaneOpen)
+        {
+            _handleReopensBookmarks = true;
+            ViewModel.IsBookmarkPanelOpen = false;
+        }
+        else if (ViewModel.IsThumbnailPaneOpen)
+        {
+            _handleReopensBookmarks = false;
+            ViewModel.IsThumbnailPanelOpen = false;
+        }
+        else if ((_handleReopensBookmarks || ViewModel.Thumbnails is null) && ViewModel.Bookmarks.Count > 0)
+        {
+            ViewModel.IsBookmarkPanelOpen = true;
+        }
+        else if (ViewModel.Thumbnails is not null)
+        {
+            ViewModel.IsThumbnailPanelOpen = true;
+        }
+    }
+
+    private void UpdateSidebarHandleGlyph()
+    {
+        // Points at where the sidebar will go: back to the left edge when it shows thumbnails or the index, out to the right when closed.
+        SidebarHandleGlyph.Glyph = ViewModel.IsThumbnailPaneOpen || ViewModel.IsBookmarkPaneOpen ? "" : "";
     }
 
     private async void OnOpenClicked(object sender, RoutedEventArgs e)

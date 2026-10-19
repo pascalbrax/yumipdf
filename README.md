@@ -18,13 +18,16 @@ Visualizzatore, editor e compilatore di moduli PDF nativo per Windows 10 e 11.
 - Annotazione di evidenziazione
 - Stampa (dialogo nativo, intervallo pagine)
 - Selezione del testo per trascinamento (solo pagine con testo nativo), con copia automatica negli appunti
+- Navigazione dall'indice del documento (segnalibri) nella barra laterale, in alternativa alle miniature
+- Firme digitali: banner e indicazione nella barra di stato per i documenti firmati, con verifica che il
+  contenuto non sia stato modificato dopo la firma (non verifica l'attendibilità del certificato - vedi
+  [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md))
 - Finestra "Informazioni" (versione, licenze di terze parti)
-- Indicazione nella barra di stato se il documento aperto si autodichiara PDF/A (letta dai suoi
+- Indicazione (barra di stato e banner in alto) se il documento aperto si autodichiara PDF/A (letta dai suoi
   metadati XMP - non una validazione completa, vedi [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md))
 
-Combo box/list box modificabili, la ricerca testo, la navigazione da miniature/indice, le annotazioni
-avanzate (nota, disegno libero, timbro) e l'installer sono pianificati nelle milestone successive - vedi
-la roadmap.
+Le annotazioni avanzate (nota, disegno libero, timbro) e l'installer sono pianificati nelle milestone
+successive - vedi la roadmap.
 
 ## Requisiti di sviluppo
 
@@ -81,3 +84,4 @@ dotnet run --project src/App/App.csproj -- "https://example.com/file.pdf"
 
 - PDFium (via `bblanchon.PDFium.Win32`): Apache-2.0
 - CommunityToolkit.Mvvm: MIT
+- System.Security.Cryptography.Pkcs (verifica dell'integrità delle firme digitali): MIT

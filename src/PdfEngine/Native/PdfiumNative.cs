@@ -435,4 +435,66 @@ internal static class PdfiumNative
 
     [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
     public static extern bool FPDFText_GetRect(IntPtr textPage, int rectIndex, out double left, out double top, out double right, out double bottom);
+
+    // ---- fpdf_doc.h : bookmarks (the document outline) -----------------------------------
+    // Read-only tree walk. A null bookmark passed to GetFirstChild means "the root", i.e. the
+    // first top-level entry. Titles come back as UTF-16LE bytes including the terminator.
+
+    public const uint PDFACTION_GOTO = 1;
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern IntPtr FPDFBookmark_GetFirstChild(IntPtr document, IntPtr bookmark);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern IntPtr FPDFBookmark_GetNextSibling(IntPtr document, IntPtr bookmark);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern uint FPDFBookmark_GetTitle(IntPtr bookmark, [Out] byte[]? buffer, uint bufferLength);
+
+    /// <summary>Number of descendants if the entry is open by default, the negated number if it is closed, 0 if it has none.</summary>
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern int FPDFBookmark_GetCount(IntPtr bookmark);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern IntPtr FPDFBookmark_GetDest(IntPtr document, IntPtr bookmark);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern IntPtr FPDFBookmark_GetAction(IntPtr bookmark);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern uint FPDFAction_GetType(IntPtr action);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern IntPtr FPDFAction_GetDest(IntPtr document, IntPtr action);
+
+    /// <summary>0-based page index a destination points at, or -1 if it cannot be resolved.</summary>
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern int FPDFDest_GetDestPageIndex(IntPtr document, IntPtr dest);
+
+    // ---- fpdf_signature.h : digital signatures (listing only - PDFium never verifies them) ---
+    // Experimental API in the headers, present in the shipped library. Contents is the DER
+    // signature value, ByteRange int pairs (offset, length), SubFilter/Time 7-bit ASCII with a
+    // trailing NUL, Reason UTF-16LE with a trailing NUL. Every getter returns the size it needs
+    // when handed a null buffer.
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern int FPDF_GetSignatureCount(IntPtr document);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern IntPtr FPDF_GetSignatureObject(IntPtr document, int index);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern uint FPDFSignatureObj_GetContents(IntPtr signature, [Out] byte[]? buffer, uint length);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern uint FPDFSignatureObj_GetByteRange(IntPtr signature, [Out] int[]? buffer, uint length);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern uint FPDFSignatureObj_GetSubFilter(IntPtr signature, [Out] byte[]? buffer, uint length);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern uint FPDFSignatureObj_GetReason(IntPtr signature, [Out] byte[]? buffer, uint length);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern uint FPDFSignatureObj_GetTime(IntPtr signature, [Out] byte[]? buffer, uint length);
 }

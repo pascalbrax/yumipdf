@@ -8,4 +8,7 @@ public sealed class AppSettings
 
     /// <summary>Whether the thumbnail strip on the left is open. Closed on a first run; afterwards it stays as the user left it.</summary>
     public bool ThumbnailPanelOpen { get; set; }
+
+    /// <summary>Whether the index (bookmarks) is the content of the left sidebar. Never true together with <see cref="ThumbnailPanelOpen"/>: the two share the sidebar and exclude each other.</summary>
+    public bool BookmarkPanelOpen { get; set; }
 }

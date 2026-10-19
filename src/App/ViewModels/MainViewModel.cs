@@ -155,6 +155,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         _restoringSettings = true;
         IsThumbnailPanelOpen = _settings.ThumbnailPanelOpen;
+        IsBookmarkPanelOpen = _settings.BookmarkPanelOpen;
         _restoringSettings = false;
     }
 
@@ -246,8 +247,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
             _document?.Dispose();
             _document = document;
 
+            Bookmarks = LoadBookmarks(document);
+
             DocumentTitle = Path.GetFileName(localPath);
-            PdfAStatusText = DetectPdfAConformance(localPath);
+            var analysis = await Task.Run(() => AnalyzeFile(localPath, document)).ConfigureAwait(true);
+            PdfAStatusText = analysis.PdfAStatus;
+            ApplyPdfAStatus(analysis.PdfAStatus);
+            ApplySignatureReport(analysis.Signatures);
             PageCount = _document.PageCount;
             CurrentPageIndex = 0;
             IsFitWidthActive = false;
@@ -284,17 +290,161 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// unrelated, secondary problem) just leaves the status text blank rather than failing the
     /// whole open.
     /// </summary>
-    private static string? DetectPdfAConformance(string localPath)
+    private static (string? PdfAStatus, PdfSignatureReport? Signatures) AnalyzeFile(string localPath, PdfDocument document)
     {
+        byte[] bytes;
         try
         {
-            var bytes = File.ReadAllBytes(localPath);
-            return PdfAConformance.Detect(bytes) ?? "Non PDF/A";
+            bytes = File.ReadAllBytes(localPath);
         }
         catch (Exception)
         {
-            return null;
+            return (null, null);
         }
+
+        var pdfa = PdfAConformance.Detect(bytes) ?? "Non PDF/A";
+        try
+        {
+            var signatures = document.GetSignatures();
+            return (pdfa, signatures.Count > 0 ? PdfSignatureVerifier.Verify(bytes, signatures) : null);
+        }
+        catch (Exception)
+        {
+            // Checking signatures is extra: whatever goes wrong in it must never stop the document from opening.
+            return (pdfa, null);
+        }
+    }
+
+    [ObservableProperty]
+    public partial string? PdfABannerTitle { get; set; }
+
+    [ObservableProperty]
+    public partial string? PdfABannerMessage { get; set; }
+
+    /// <summary>The banner above the pages for a document that declares itself PDF/A; closable, and back with the next such document.</summary>
+    [ObservableProperty]
+    public partial bool IsPdfABannerOpen { get; set; }
+
+    /// <summary>
+    /// <paramref name="status"/> is what <see cref="AnalyzeFile"/> found: "PDF/A-2B" (etc.), "Non
+    /// PDF/A", or null. Only an actual PDF/A claim gets a banner - "Non PDF/A" stays a quiet note
+    /// in the status bar, being no more than the absence of a claim.
+    /// </summary>
+    private void ApplyPdfAStatus(string? status)
+    {
+        if (status is null || !status.StartsWith("PDF/A-", StringComparison.Ordinal))
+        {
+            IsPdfABannerOpen = false;
+            PdfABannerTitle = null;
+            PdfABannerMessage = null;
+            return;
+        }
+
+        PdfABannerTitle = $"Documento {status}";
+        PdfABannerMessage = "Conformità dichiarata dal file, non verificata.";
+        IsPdfABannerOpen = true;
+    }
+
+    // ---- Digital signatures ---------------------------------------------------------------
+
+    /// <summary>How the open document's signatures stand; null for a document with none (nothing is shown then).</summary>
+    [ObservableProperty]
+    public partial PdfSignatureStatus? SignatureState { get; set; }
+
+    /// <summary>Short text for the status bar.</summary>
+    [ObservableProperty]
+    public partial string? SignatureStatusText { get; set; }
+
+    [ObservableProperty]
+    public partial string? SignatureBannerTitle { get; set; }
+
+    [ObservableProperty]
+    public partial string? SignatureBannerMessage { get; set; }
+
+    /// <summary>The banner above the pages; the user can close it, and it comes back with the next signed document.</summary>
+    [ObservableProperty]
+    public partial bool IsSignatureBannerOpen { get; set; }
+
+    public Visibility SignatureStatusVisibility => SignatureState is null ? Visibility.Collapsed : Visibility.Visible;
+
+    public bool IsSignatureIntact => SignatureState == PdfSignatureStatus.Intact;
+
+    public bool IsSignatureCaution => SignatureState is PdfSignatureStatus.ChangedAfterSigning or PdfSignatureStatus.Unverifiable;
+
+    public bool IsSignatureAltered => SignatureState == PdfSignatureStatus.Altered;
+
+    public Microsoft.UI.Xaml.Controls.InfoBarSeverity SignatureBannerSeverity => SignatureState switch
+    {
+        PdfSignatureStatus.Intact => Microsoft.UI.Xaml.Controls.InfoBarSeverity.Success,
+        PdfSignatureStatus.Altered => Microsoft.UI.Xaml.Controls.InfoBarSeverity.Error,
+        _ => Microsoft.UI.Xaml.Controls.InfoBarSeverity.Warning,
+    };
+
+    partial void OnSignatureStateChanged(PdfSignatureStatus? value)
+    {
+        OnPropertyChanged(nameof(SignatureStatusVisibility));
+        OnPropertyChanged(nameof(IsSignatureIntact));
+        OnPropertyChanged(nameof(IsSignatureCaution));
+        OnPropertyChanged(nameof(IsSignatureAltered));
+        OnPropertyChanged(nameof(SignatureBannerSeverity));
+    }
+
+    /// <summary>
+    /// Shows what <see cref="PdfSignatureVerifier"/> found. Every text says "integrity" or
+    /// "not modified" - never that the signer is trustworthy: the certificate is not checked
+    /// against any trusted root (see the verifier's remarks), and the banner says so.
+    /// </summary>
+    private void ApplySignatureReport(PdfSignatureReport? report)
+    {
+        if (report is null || report.Latest is not { } latest)
+        {
+            SignatureState = null;
+            SignatureStatusText = null;
+            SignatureBannerTitle = null;
+            SignatureBannerMessage = null;
+            IsSignatureBannerOpen = false;
+            return;
+        }
+
+        var count = report.Signatures.Count;
+        var who = DescribeSigner(latest);
+        var many = count > 1 ? $" ({count} firme)" : string.Empty;
+
+        switch (report.Overall)
+        {
+            case PdfSignatureStatus.Intact:
+                SignatureStatusText = "Firmato digitalmente" + many;
+                SignatureBannerTitle = "Documento firmato digitalmente";
+                SignatureBannerMessage = $"{(count > 1 ? $"{count} firme, l'ultima di {who}" : $"Firmato da {who}")}. "
+                    + "Il contenuto non è stato modificato dopo la firma. Il certificato del firmatario non è stato verificato.";
+                break;
+            case PdfSignatureStatus.ChangedAfterSigning:
+                SignatureStatusText = "Firmato · modificato dopo la firma";
+                SignatureBannerTitle = "Documento modificato dopo la firma";
+                SignatureBannerMessage = $"Firma di {who}. Il file contiene modifiche successive alla firma: ciò che si vede potrebbe non essere ciò che è stato firmato.";
+                break;
+            case PdfSignatureStatus.Altered:
+                var broken = report.Signatures.First(c => c.Status == PdfSignatureStatus.Altered);
+                SignatureStatusText = "Firma non valida";
+                SignatureBannerTitle = "Firma digitale non valida";
+                SignatureBannerMessage = $"Firma di {DescribeSigner(broken)}: {broken.Detail}. Non fidarti del contenuto di questo documento.";
+                break;
+            default:
+                var unchecked_ = report.Signatures.First(c => c.Status == PdfSignatureStatus.Unverifiable);
+                SignatureStatusText = "Firmato · non verificabile";
+                SignatureBannerTitle = "Documento firmato, firma non verificabile";
+                SignatureBannerMessage = $"Non è stato possibile verificare la firma di {DescribeSigner(unchecked_)}: {unchecked_.Detail}. Il documento potrebbe comunque essere integro.";
+                break;
+        }
+
+        SignatureState = report.Overall;
+        IsSignatureBannerOpen = true;
+    }
+
+    private static string DescribeSigner(PdfSignatureCheck check)
+    {
+        var name = string.IsNullOrWhiteSpace(check.SignerName) ? "firmatario sconosciuto" : check.SignerName;
+        return check.SigningTime is { } time ? $"{name} il {time.ToLocalTime():g}" : name;
     }
 
     [RelayCommand(CanExecute = nameof(CanGoToPreviousPage))]
@@ -850,6 +1000,126 @@ public partial class MainViewModel : ObservableObject, IDisposable
         return Math.Min(MaxZoom, SafeMaxPixelDimension / maxPointDimension);
     }
 
+    // ---- Bookmarks (document index) -----------------------------------------------------
+
+    /// <summary>
+    /// The current document's outline, empty when it has none - which is also what keeps the
+    /// index's toolbar button out of sight. Shares the left sidebar with the thumbnails: only
+    /// one of the two is ever the sidebar's content (see <see cref="OnIsBookmarkPanelOpenChanged"/>).
+    /// </summary>
+    [ObservableProperty]
+    public partial IReadOnlyList<BookmarkNodeViewModel> Bookmarks { get; set; } = Array.Empty<BookmarkNodeViewModel>();
+
+    /// <summary>The user's choice for the index (toolbar button); remembered between sessions, like the thumbnails'.</summary>
+    [ObservableProperty]
+    public partial bool IsBookmarkPanelOpen { get; set; }
+
+    public Visibility BookmarkButtonVisibility => Bookmarks.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+
+    /// <summary>What the sidebar actually shows: the user's choice, but never for a document without an index.</summary>
+    public bool IsBookmarkPaneOpen => IsBookmarkPanelOpen && Bookmarks.Count > 0;
+
+    /// <summary>
+    /// The index entry the page being read belongs to: the last one, in document order, that
+    /// starts at or before the current page - how an outline is conventionally read. Null for a
+    /// document without an index, or before its first entry.
+    /// </summary>
+    [ObservableProperty]
+    public partial BookmarkNodeViewModel? CurrentBookmark { get; set; }
+
+    private List<BookmarkNodeViewModel> _bookmarksInOrder = new();
+
+    private void UpdateCurrentBookmark()
+    {
+        BookmarkNodeViewModel? found = null;
+        foreach (var node in _bookmarksInOrder)
+        {
+            if (node.CanNavigate && node.PageIndex <= CurrentPageIndex)
+            {
+                found = node;
+            }
+        }
+
+        if (ReferenceEquals(found, CurrentBookmark))
+        {
+            return;
+        }
+
+        if (CurrentBookmark is not null)
+        {
+            CurrentBookmark.IsCurrent = false;
+        }
+
+        CurrentBookmark = found;
+        if (found is null)
+        {
+            return;
+        }
+
+        found.IsCurrent = true;
+        // Open the way down to it, so the highlight is never hidden inside a collapsed parent.
+        for (var ancestor = found.Parent; ancestor is not null; ancestor = ancestor.Parent)
+        {
+            ancestor.IsExpanded = true;
+        }
+    }
+
+    private static void Flatten(IEnumerable<BookmarkNodeViewModel> nodes, List<BookmarkNodeViewModel> into)
+    {
+        foreach (var node in nodes)
+        {
+            into.Add(node);
+            Flatten(node.Children, into);
+        }
+    }
+
+    partial void OnBookmarksChanged(IReadOnlyList<BookmarkNodeViewModel> value)
+    {
+        _bookmarksInOrder = new List<BookmarkNodeViewModel>();
+        Flatten(value, _bookmarksInOrder);
+        CurrentBookmark = null;
+        UpdateCurrentBookmark();
+        OnPropertyChanged(nameof(BookmarkButtonVisibility));
+        OnPropertyChanged(nameof(SidebarHandleVisibility));
+        OnPropertyChanged(nameof(IsBookmarkPaneOpen));
+        OnPropertyChanged(nameof(IsLeftPaneOpen));
+        OnPropertyChanged(nameof(LeftPaneWidth));
+    }
+
+    partial void OnIsBookmarkPanelOpenChanged(bool value)
+    {
+        OnPropertyChanged(nameof(IsBookmarkPaneOpen));
+        OnPropertyChanged(nameof(IsLeftPaneOpen));
+        OnPropertyChanged(nameof(LeftPaneWidth));
+        if (value)
+        {
+            // Thumbnails and the index share the sidebar and never show together.
+            IsThumbnailPanelOpen = false;
+        }
+
+        if (_restoringSettings)
+        {
+            return;
+        }
+
+        _settings.BookmarkPanelOpen = value;
+        SaveSettings();
+    }
+
+    private static IReadOnlyList<BookmarkNodeViewModel> LoadBookmarks(PdfDocument document)
+    {
+        try
+        {
+            var pageCount = document.PageCount;
+            return document.GetBookmarks().Select(bookmark => new BookmarkNodeViewModel(bookmark, pageCount)).ToList();
+        }
+        catch (Exception)
+        {
+            // A damaged outline must never stop the document itself from opening.
+            return Array.Empty<BookmarkNodeViewModel>();
+        }
+    }
+
     // ---- Thumbnails ---------------------------------------------------------------------
 
     /// <summary>Below this many pages a thumbnail strip adds nothing over just scrolling the document.</summary>
@@ -878,6 +1148,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     public Visibility ThumbnailButtonVisibility => Thumbnails is not null ? Visibility.Visible : Visibility.Collapsed;
 
+    /// <summary>The sidebar's edge handle is there whenever there is something to put in it: thumbnails or an index.</summary>
+    public Visibility SidebarHandleVisibility => Thumbnails is not null || Bookmarks.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+
     /// <summary>What the strip's <c>SplitView</c> actually shows: the user's choice, but never for a document without thumbnails.</summary>
     public bool IsThumbnailPaneOpen => IsThumbnailPanelOpen && Thumbnails is not null;
 
@@ -888,18 +1161,19 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// than one is open at once they overlay each other inside the same pane (Compila modulo on
     /// top of Cerca on top delle miniature, by declaration order in the XAML).
     /// </summary>
-    public bool IsLeftPaneOpen => IsThumbnailPaneOpen || IsSearchOpen || IsFormPanelOpen;
+    public bool IsLeftPaneOpen => IsThumbnailPaneOpen || IsBookmarkPaneOpen || IsSearchOpen || IsFormPanelOpen;
 
     /// <summary>
     /// Compila modulo needs more room for its field list than thumbnails/Cerca do - widening
     /// only while it is the active reason the pane is open, rather than picking one fixed width
     /// that is cramped for one of the three uses.
     /// </summary>
-    public double LeftPaneWidth => IsFormPanelOpen ? 340 : 230;
+    public double LeftPaneWidth => IsFormPanelOpen ? 340 : IsBookmarkPaneOpen ? 300 : 230;
 
     partial void OnThumbnailsChanged(PdfThumbnailSet? value)
     {
         OnPropertyChanged(nameof(ThumbnailButtonVisibility));
+        OnPropertyChanged(nameof(SidebarHandleVisibility));
         OnPropertyChanged(nameof(IsThumbnailPaneOpen));
         OnPropertyChanged(nameof(IsLeftPaneOpen));
     }
@@ -908,6 +1182,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         OnPropertyChanged(nameof(IsThumbnailPaneOpen));
         OnPropertyChanged(nameof(IsLeftPaneOpen));
+        OnPropertyChanged(nameof(LeftPaneWidth));
+        if (value)
+        {
+            // Thumbnails and the index share the sidebar and never show together.
+            IsBookmarkPanelOpen = false;
+        }
+
         if (_restoringSettings)
         {
             return;
@@ -1105,6 +1386,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     partial void OnCurrentPageIndexChanged(int value)
     {
+        UpdateCurrentBookmark();
         PreviousPageCommand.NotifyCanExecuteChanged();
         NextPageCommand.NotifyCanExecuteChanged();
     }

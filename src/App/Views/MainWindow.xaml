@@ -27,6 +27,8 @@
             <AppBarSeparator />
             <AppBarToggleButton Icon="Pictures" Label="Miniature" IsChecked="{x:Bind ViewModel.IsThumbnailPanelOpen, Mode=TwoWay}"
                                  Visibility="{x:Bind ViewModel.ThumbnailButtonVisibility, Mode=OneWay}" />
+            <AppBarToggleButton Icon="List" Label="Indice" IsChecked="{x:Bind ViewModel.IsBookmarkPanelOpen, Mode=TwoWay}"
+                                 Visibility="{x:Bind ViewModel.BookmarkButtonVisibility, Mode=OneWay}" />
             <AppBarToggleButton Icon="Edit" Label="Compila modulo" IsChecked="{x:Bind ViewModel.IsFormPanelOpen, Mode=TwoWay}"
                                  Visibility="{x:Bind ViewModel.FormButtonVisibility, Mode=OneWay}" />
             <AppBarSeparator />
@@ -59,11 +61,42 @@
                     <local:CoverFlowStrip x:Name="ThumbnailStrip" Visibility="{x:Bind ViewModel.IsThumbnailPaneOpen, Mode=OneWay}" />
 
                     <!--
+                        Indice (bookmarks): occupies the same slot as the thumbnails and never
+                        shows together with them (MainViewModel.IsBookmarkPanelOpen/IsThumbnailPanelOpen
+                        exclude each other). A click goes to the entry's page; the arrow expands or
+                        collapses an entry without navigating. Its top inset follows the Cerca bar
+                        (OnSearchBarSizeChanged), so the first entries are not hidden under it.
+                    -->
+                    <TreeView x:Name="BookmarkTree" ItemsSource="{x:Bind ViewModel.Bookmarks, Mode=OneWay}"
+                              SelectionMode="None" ItemInvoked="OnBookmarkInvoked"
+                              Visibility="{x:Bind ViewModel.IsBookmarkPaneOpen, Mode=OneWay}">
+                        <TreeView.ItemTemplate>
+                            <DataTemplate x:DataType="vm:BookmarkNodeViewModel">
+                                <TreeViewItem ItemsSource="{x:Bind Children}" IsExpanded="{x:Bind IsExpanded, Mode=TwoWay}" AutomationProperties.Name="{x:Bind Title}">
+                                    <Grid HorizontalAlignment="Stretch" Margin="{x:Bind RowMargin}">
+                                        <!-- The entry the page being read belongs to: a soft accent tint with a bar on its left edge. -->
+                                        <Border Visibility="{x:Bind IsCurrent, Mode=OneWay}" CornerRadius="4" Margin="-4,-2,0,-2"
+                                                Background="{ThemeResource AccentFillColorDefaultBrush}" Opacity="0.16" />
+                                        <Border Visibility="{x:Bind IsCurrent, Mode=OneWay}" Width="3" CornerRadius="2" Margin="-4,2,0,2"
+                                                HorizontalAlignment="Left" Background="{ThemeResource AccentFillColorDefaultBrush}" />
+                                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                            <TextBlock Text="{x:Bind Title}" FontSize="{x:Bind TitleFontSize}" FontWeight="{x:Bind TitleFontWeight, Mode=OneWay}"
+                                                       Opacity="{x:Bind TitleOpacity}" TextTrimming="CharacterEllipsis"
+                                                       ToolTipService.ToolTip="{x:Bind Title}" VerticalAlignment="Center" Margin="6,0,0,0" />
+                                            <TextBlock Grid.Column="1" Text="{x:Bind PageText}" Opacity="0.6" FontSize="12" VerticalAlignment="Center" />
+                                        </Grid>
+                                    </Grid>
+                                </TreeViewItem>
+                            </DataTemplate>
+                        </TreeView.ItemTemplate>
+                    </TreeView>
+
+                    <!--
                         Cerca: fascia in alto, sovrapposta alle miniature se entrambe attive -
                         stesso sfondo/bordo che aveva sopra l'area pagine, ma in verticale: qui
                         la barra è molto più stretta di quanto non fosse sopra il documento.
                     -->
-                    <Border x:Name="SearchBar" VerticalAlignment="Top" HorizontalAlignment="Stretch"
+                    <Border x:Name="SearchBar" VerticalAlignment="Top" HorizontalAlignment="Stretch" SizeChanged="OnSearchBarSizeChanged"
                             Background="{ThemeResource LayerFillColorDefaultBrush}"
                             BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="0,0,0,1"
                             Padding="12,8" Visibility="{x:Bind ViewModel.IsSearchOpen, Mode=OneWay}">
@@ -176,7 +209,45 @@
             </SplitView.Pane>
 
             <SplitView.Content>
-                <Grid>
+                <Grid RowDefinitions="Auto,*">
+
+                <!--
+                    Banners above the pages, stacked when more than one applies; each is closable
+                    and only present when it has something to say. Digital signature: what the
+                    document's signatures amount to (MainViewModel.ApplySignatureReport). PDF/A:
+                    that the document declares itself PDF/A (ApplyPdfAStatus) - informational blue,
+                    since a document being PDF/A is neither good nor bad news.
+                -->
+                <StackPanel Grid.Row="0">
+                    <InfoBar IsOpen="{x:Bind ViewModel.IsSignatureBannerOpen, Mode=TwoWay}" IsClosable="True" CornerRadius="0"
+                             Severity="{x:Bind ViewModel.SignatureBannerSeverity, Mode=OneWay}"
+                             Title="{x:Bind ViewModel.SignatureBannerTitle, Mode=OneWay}"
+                             Message="{x:Bind ViewModel.SignatureBannerMessage, Mode=OneWay}" />
+                    <InfoBar IsOpen="{x:Bind ViewModel.IsPdfABannerOpen, Mode=TwoWay}" IsClosable="True" CornerRadius="0"
+                             Severity="Informational"
+                             Title="{x:Bind ViewModel.PdfABannerTitle, Mode=OneWay}"
+                             Message="{x:Bind ViewModel.PdfABannerMessage, Mode=OneWay}">
+                        <InfoBar.Resources>
+                            <!--
+                                The informational icon defaults to the user's accent color, which for a
+                                red accent reads as an error. A fixed blue keeps "informational" looking
+                                like information whatever accent Windows is set to.
+                            -->
+                            <ResourceDictionary>
+                                <ResourceDictionary.ThemeDictionaries>
+                                    <ResourceDictionary x:Key="Light">
+                                        <SolidColorBrush x:Key="InfoBarInformationalSeverityIconBackground" Color="#0F6CBD" />
+                                    </ResourceDictionary>
+                                    <ResourceDictionary x:Key="Dark">
+                                        <SolidColorBrush x:Key="InfoBarInformationalSeverityIconBackground" Color="#479EF5" />
+                                    </ResourceDictionary>
+                                </ResourceDictionary.ThemeDictionaries>
+                            </ResourceDictionary>
+                        </InfoBar.Resources>
+                    </InfoBar>
+                </StackPanel>
+
+                <Grid Grid.Row="1">
 
                 <ScrollViewer x:Name="PagesScrollViewer"
                               HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"
@@ -362,16 +433,17 @@
                     </ItemsControl>
                 </ScrollViewer>
 
-                    <!-- Handle on the strip's edge: the same open/close as the toolbar button. -->
-                    <Button x:Name="ThumbnailHandle" HorizontalAlignment="Left" VerticalAlignment="Center"
+                    <!-- Handle on the sidebar's edge: opens/closes whichever of thumbnails or index it shows (OnSidebarHandleClicked). -->
+                    <Button x:Name="SidebarHandle" HorizontalAlignment="Left" VerticalAlignment="Center"
                             Width="18" Height="72" Padding="0" CornerRadius="0,6,6,0"
-                            Visibility="{x:Bind ViewModel.ThumbnailButtonVisibility, Mode=OneWay}"
-                            Click="OnThumbnailHandleClicked"
-                            AutomationProperties.Name="Mostra o nascondi le miniature"
-                            ToolTipService.ToolTip="Miniature">
-                        <FontIcon x:Name="ThumbnailHandleGlyph" Glyph="&#xE76C;" FontSize="10" />
+                            Visibility="{x:Bind ViewModel.SidebarHandleVisibility, Mode=OneWay}"
+                            Click="OnSidebarHandleClicked"
+                            AutomationProperties.Name="Mostra o nascondi miniature o indice"
+                            ToolTipService.ToolTip="Miniature / Indice">
+                        <FontIcon x:Name="SidebarHandleGlyph" Glyph="&#xE76C;" FontSize="10" />
                     </Button>
 
+                </Grid>
                 </Grid>
             </SplitView.Content>
 
@@ -388,6 +460,17 @@
                 an error.
             -->
             <TextBlock Text="{x:Bind ViewModel.PdfAStatusText, Mode=OneWay}" VerticalAlignment="Center" Opacity="0.7" />
+            <!-- Digital signatures: shown only for a signed document; the icon's color says how it stands (green intact, amber changed/unverifiable, red invalid). -->
+            <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center"
+                        Visibility="{x:Bind ViewModel.SignatureStatusVisibility, Mode=OneWay}">
+                <FontIcon Glyph="&#xEA18;" FontSize="14" Foreground="{ThemeResource SystemFillColorSuccessBrush}"
+                          Visibility="{x:Bind ViewModel.IsSignatureIntact, Mode=OneWay}" />
+                <FontIcon Glyph="&#xE7BA;" FontSize="14" Foreground="{ThemeResource SystemFillColorCautionBrush}"
+                          Visibility="{x:Bind ViewModel.IsSignatureCaution, Mode=OneWay}" />
+                <FontIcon Glyph="&#xEA39;" FontSize="14" Foreground="{ThemeResource SystemFillColorCriticalBrush}"
+                          Visibility="{x:Bind ViewModel.IsSignatureAltered, Mode=OneWay}" />
+                <TextBlock Text="{x:Bind ViewModel.SignatureStatusText, Mode=OneWay}" VerticalAlignment="Center" />
+            </StackPanel>
             <ProgressBar Width="160" VerticalAlignment="Center"
                          Visibility="{x:Bind ViewModel.ProgressVisibility, Mode=OneWay}"
                          IsIndeterminate="{x:Bind ViewModel.IsProgressIndeterminate, Mode=OneWay}"
