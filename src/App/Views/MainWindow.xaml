@@ -383,6 +383,14 @@
                         progressively - see MainViewModel.RenderAllPagesAsync.
                     -->
                     <ItemsControl x:Name="PagesItemsControl" ItemsSource="{x:Bind ViewModel.Pages}" Padding="24">
+                        <ItemsControl.Resources>
+                            <!--
+                                One soft shadow shared by every page (Translation on the page border sets its depth).
+                                No explicit receiver: ThemeShadow.Receivers.Add(...) crashes the app at startup (access
+                                violation in the WinUI projection), and the shadow renders fine without it.
+                            -->
+                            <ThemeShadow x:Key="PageShadow" />
+                        </ItemsControl.Resources>
                         <ItemsControl.ItemsPanel>
                             <ItemsPanelTemplate>
                                 <StackPanel Orientation="Vertical" Spacing="16" HorizontalAlignment="Center" />
@@ -391,6 +399,7 @@
                         <ItemsControl.ItemTemplate>
                             <DataTemplate x:DataType="vm:PdfPageViewModel">
                                 <Border Background="White" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1"
+                                        Shadow="{StaticResource PageShadow}" Translation="0,0,16"
                                         Width="{x:Bind PixelWidth, Mode=OneWay}" Height="{x:Bind PixelHeight, Mode=OneWay}">
                                     <Grid>
                                         <Image Source="{x:Bind Bitmap, Mode=OneWay}" Stretch="Fill" />

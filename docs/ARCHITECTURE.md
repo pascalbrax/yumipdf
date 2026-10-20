@@ -81,6 +81,14 @@ ricalcola l'offset dalle nuove altezze (24 px di margine, 16 fra le pagine) e lo
 `ChangeView` senza animazione. Durante lo spostamento la sincronizzazione scorrimento->pagina corrente e' sospesa
 (`ZoomSettleMilliseconds`). Verificato dal vivo su un PDF di 60 pagine: da pagina 30, 3 zoom avanti (125%, 156%, 195%) restano sulla 30 (prima del fix a 125% si vedeva la 24). Non provati: zoom indietro e "Adatta a larghezza/pagina" con la versione corretta.
 
+## Ombra sotto le pagine
+
+Ogni pagina della vista principale ha una leggera ombra (`ThemeShadow` condiviso, risorsa `PageShadow` dell'`ItemsControl`,
+con `Translation="0,0,16"` sul bordo della pagina per la profondita'): staccare la pagina bianca dallo sfondo. La
+luce di `ThemeShadow` viene dall'alto, quindi l'ombra cade sotto e ai lati. **Non** aggiungere un receiver da codice
+(`ThemeShadow.Receivers.Add(PagesScrollViewer)`): provato, l'app va in crash all'avvio (access violation, 0xC0000005,
+nella proiezione WinRT); senza receiver l'ombra si vede comunque sullo sfondo dell'area pagine.
+
 ## Zoom massimo per documento
 
 Lo stesso documento con pagine molto grandi (formato architettonico, ~40x24 pollici) espone un secondo
