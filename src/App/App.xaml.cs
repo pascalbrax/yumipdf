@@ -23,6 +23,16 @@ public partial class App : Application
 
         _window = new MainWindow(initialSource);
         _window.Activate();
+
+        try
+        {
+            // An association registered before the rename still lists the app under its old name.
+            Services.FileAssociationService.RefreshRegisteredName();
+        }
+        catch (Exception)
+        {
+            // Cosmetic and per-user registry only: never worth failing the launch.
+        }
     }
 
     /// <summary>

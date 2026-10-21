@@ -939,3 +939,13 @@ per i binding WinRT) deriva nomi di tipo interni dal nome assembly e non gestisc
 **inizia con una cifra** ("26PDF" → generava codice non compilabile, `PDFVtableClasses` non trovato, ecc. -
 verificato scaffoldando questo progetto). "PDF26" inizia con una lettera e non è affetto dal problema;
 `AssemblyName`, `<Product>`, `Window.Title` e la cartella di cache temporanea usano tutti "PDF26".
+
+**Nome mostrato all'utente: YumiPDF.** Cambiati solo i testi che l'utente vede: titolo della finestra e nome del lavoro di stampa,
+finestra "Informazioni", finestra "Opzioni" (interruttore dell'associazione file), `<Product>` e `<AssemblyTitle>` (Esplora file >
+Dettagli, Gestione attività) e il nome con cui l'associazione `.pdf` si presenta a Windows (`ApplicationName` in "Apri con").
+**Restano "PDF26"** gli identificatori interni: `AssemblyName` (quindi `PDF26.exe`), namespace `Pdf26`, la cartella delle impostazioni
+e dei log in `%LocalAppData%/PDF26` (cambiarla farebbe perdere le preferenze e l'elenco dei recenti), la cartella di cache temporanea,
+`ProgId`/chiave di registrazione dell'associazione, le chiavi private scritte nei PDF (`/PDF26`, `/PDF26Id`) e i nomi dei font
+incorporati ("PDF26 Sans/Serif/Mono": un'annotazione già salvata con quelle chiavi resta riconoscibile).
+`FileAssociationService.RefreshRegisteredName` aggiorna all'avvio, in silenzio, il nome di un'associazione registrata da una
+versione precedente (non registra mai da sola). Nota: l'immagine `about.png` contiene la scritta "PDF26" disegnata nell'immagine.

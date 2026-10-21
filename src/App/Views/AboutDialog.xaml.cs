@@ -12,10 +12,13 @@ public sealed partial class AboutDialog : ContentDialog
     {
         InitializeComponent();
 
-        var iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico");
-        if (File.Exists(iconPath))
+        // about.png (the project's picture, linked from the repository root - see App.csproj); the small app icon if it is missing.
+        var picturePath = Path.Combine(AppContext.BaseDirectory, "Assets", "about.png");
+        var fallbackPath = Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico");
+        var imagePath = File.Exists(picturePath) ? picturePath : File.Exists(fallbackPath) ? fallbackPath : null;
+        if (imagePath is not null)
         {
-            AppIconImage.Source = new BitmapImage(new Uri(iconPath));
+            AboutImage.Source = new BitmapImage(new Uri(imagePath));
         }
 
         // FileVersionInfo, non Assembly.GetName().Version: quest'ultima legge solo

@@ -11,7 +11,9 @@
          original "26PDF" AssemblyName triggered CS0246/CS1729 in WinRTVtable.g.cs).
          "PDF26" starts with a letter, so it does not hit that bug. -->
     <AssemblyName>PDF26</AssemblyName>
-    <Product>PDF26</Product>
+    <Product>YumiPDF</Product>
+    <!-- The name Explorer (Details) and Task Manager show; the assembly/exe name stays PDF26 (see above). -->
+    <AssemblyTitle>YumiPDF</AssemblyTitle>
     <ApplicationIcon>Assets\AppIcon.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <UseWinUI>true</UseWinUI>
@@ -44,6 +46,8 @@
   <ItemGroup>
     <!-- Also shipped next to the exe: AppWindow.SetIcon (see Services/WindowIcon) loads it from disk at runtime. -->
     <Content Include="Assets\AppIcon.ico" CopyToOutputDirectory="PreserveNewest" />
+    <!-- The picture shown in the About dialog; one copy only, in the repository root. -->
+    <Content Include="../../about.png" Link="Assets/about.png" CopyToOutputDirectory="PreserveNewest" />
     <!-- The fonts bundled in PdfEngine are SIL OFL: their license texts travel with the app (also embedded in PdfEngine.dll). -->
     <Content Include="..\PdfEngine\Fonts\LICENSE-*.txt;..\PdfEngine\Fonts\AUTHORS-*.txt" Link="Licenses\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

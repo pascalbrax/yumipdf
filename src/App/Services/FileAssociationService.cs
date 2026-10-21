@@ -22,10 +22,32 @@ public static class FileAssociationService
     private const string ProgId = "PDF26.Document";
     private const string AppRegistrationName = "PDF26";
 
+    /// <summary>The name Windows shows for the app in "Open with" and in the default apps settings.</summary>
+    private const string DisplayName = "YumiPDF";
+
     public static bool IsRegistered()
     {
         using var key = Registry.CurrentUser.OpenSubKey(@"Software\Classes\.pdf\OpenWithProgids");
         return key?.GetValue(ProgId) is not null;
+    }
+
+    /// <summary>
+    /// Brings the name Windows lists the app under up to date for an association registered by an earlier version (which
+    /// registered it under the old name). Does nothing when the user never registered it - it must not register by itself.
+    /// </summary>
+    public static void RefreshRegisteredName()
+    {
+        if (!IsRegistered())
+        {
+            return;
+        }
+
+        using var capabilitiesKey = Registry.CurrentUser.OpenSubKey($@"Software\{AppRegistrationName}\Capabilities", writable: true);
+        if (capabilitiesKey is not null && !string.Equals(capabilitiesKey.GetValue("ApplicationName") as string, DisplayName, StringComparison.Ordinal))
+        {
+            capabilitiesKey.SetValue("ApplicationName", DisplayName);
+            NotifyShellOfAssociationChange();
+        }
     }
 
     public static void Register()
@@ -53,7 +75,9 @@ public static class FileAssociationService
 
         using (var capabilitiesKey = Registry.CurrentUser.CreateSubKey($@"Software\{AppRegistrationName}\Capabilities"))
         {
-            capabilitiesKey.SetValue("ApplicationName", "PDF26");
+            // The name Windows lists under "Open with" and in the default apps settings. The registry keys themselves
+            // (ProgId, AppRegistrationName) keep the old internal name: they are identifiers, nobody sees them.
+            capabilitiesKey.SetValue("ApplicationName", DisplayName);
             capabilitiesKey.SetValue("ApplicationDescription", "Visualizzatore, editor e compilatore PDF");
             using var fileAssociationsKey = capabilitiesKey.CreateSubKey("FileAssociations");
             fileAssociationsKey.SetValue(".pdf", ProgId);
@@ -86,7 +110,7 @@ public static class FileAssociationService
         NotifyShellOfAssociationChange();
     }
 
-    /// <summary>Opens Windows' own "Default apps" settings page, where the user can pick PDF26 as the default for .pdf.</summary>
+    /// <summary>Opens Windows' own "Default apps" settings page, where the user can pick YumiPDF as the default for .pdf.</summary>
     public static void OpenWindowsDefaultAppsSettings()
     {
         Process.Start(new ProcessStartInfo("ms-settings:defaultapps") { UseShellExecute = true });

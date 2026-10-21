@@ -39,7 +39,7 @@ public sealed partial class MainWindow : Window
     {
         _initialSource = initialSource;
         InitializeComponent();
-        Title = "PDF26";
+        Title = "YumiPDF";
         WindowIcon.Apply(this);
 
         ViewModel.PropertyChanged += OnViewModelPropertyChanged;
@@ -438,7 +438,7 @@ public sealed partial class MainWindow : Window
         try
         {
             _printService.TryShowPrintDialogAndPrint(
-                WindowNative.GetWindowHandle(this), ViewModel.Document, ViewModel.DocumentTitle ?? "PDF26",
+                WindowNative.GetWindowHandle(this), ViewModel.Document, ViewModel.DocumentTitle ?? "YumiPDF",
                 ViewModel.RenderPageForPrint);
         }
         catch (Exception ex)

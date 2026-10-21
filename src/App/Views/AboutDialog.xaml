@@ -5,25 +5,25 @@
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d"
-    Title="Informazioni su PDF26"
+    Title="Informazioni su YumiPDF"
     CloseButtonText="Chiudi"
     DefaultButton="Close">
 
     <StackPanel Spacing="16" MinWidth="320" MaxWidth="360">
 
-        <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
-            <Image x:Name="AppIconImage" Width="48" Height="48" />
-            <StackPanel VerticalAlignment="Center">
-                <TextBlock Text="PDF26" Style="{StaticResource SubtitleTextBlockStyle}" />
-                <TextBlock x:Name="VersionText" Opacity="0.7" />
-            </StackPanel>
+        <!-- The name and version sit under the picture, centered. -->
+        <Image x:Name="AboutImage" Width="240" Height="240" HorizontalAlignment="Center" />
+        <StackPanel HorizontalAlignment="Center">
+            <TextBlock Text="YumiPDF" Style="{StaticResource SubtitleTextBlockStyle}" HorizontalAlignment="Center" />
+            <TextBlock Text="(Codename PDF26)" Opacity="0.7" FontSize="12" HorizontalAlignment="Center" />
+            <TextBlock x:Name="VersionText" Opacity="0.7" HorizontalAlignment="Center" />
         </StackPanel>
 
         <TextBlock TextWrapping="Wrap"
                    Text="Visualizzatore, editor e compilatore di moduli PDF nativo per Windows 10 e 11." />
 
         <TextBlock TextWrapping="Wrap" Opacity="0.7" FontSize="12"
-                   Text="Componenti di terze parti: PDFium (bblanchon.PDFium.Win32, Apache-2.0), CommunityToolkit.Mvvm (MIT), System.Security.Cryptography.Pkcs (MIT), iText Core (AGPL-3.0); font Liberation (derivati, rinominati PDF26 Sans/Serif/Mono) e Noto Sans (SIL OFL 1.1) per riscrivere il testo." />
+                   Text="Componenti di terze parti: PDFium (bblanchon.PDFium.Win32, Apache-2.0), CommunityToolkit.Mvvm (MIT), System.Security.Cryptography.Pkcs (MIT), iText Core (AGPL-3.0); font Liberation (derivati e rinominati) e Noto Sans (SIL OFL 1.1) per riscrivere il testo." />
 
         <TextBlock x:Name="CopyrightText" Opacity="0.6" FontSize="12" />
 

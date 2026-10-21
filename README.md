@@ -1,4 +1,7 @@
-# PDF26
+# YumiPDF
+
+> Il nome dell'app è YumiPDF; i nomi interni (eseguibile `PDF26.exe`, namespace `Pdf26`, cartella delle impostazioni
+> in `%LocalAppData%/PDF26`, chiavi private nei PDF) restano quelli originali, perché l'utente non li vede.
 
 Visualizzatore, editor e compilatore di moduli PDF nativo per Windows 10 e 11.
 
