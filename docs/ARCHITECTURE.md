@@ -938,12 +938,14 @@ L'app si chiama **PDF26** (non 26PDF): il generatore di sorgenti CsWinRT (usato 
 per i binding WinRT) deriva nomi di tipo interni dal nome assembly e non gestisce correttamente un nome che
 **inizia con una cifra** ("26PDF" → generava codice non compilabile, `PDFVtableClasses` non trovato, ecc. -
 verificato scaffoldando questo progetto). "PDF26" inizia con una lettera e non è affetto dal problema;
-`AssemblyName`, `<Product>`, `Window.Title` e la cartella di cache temporanea usano tutti "PDF26".
+`AssemblyName`, `<Product>`, `Window.Title` e la cartella di cache temporanea usavano tutti "PDF26" (poi l'app è stata
+rinominata: vedi sotto - l'`AssemblyName` è ora "YumiPDF", che inizia con una lettera e non ha lo stesso problema).
 
 **Nome mostrato all'utente: YumiPDF.** Cambiati solo i testi che l'utente vede: titolo della finestra e nome del lavoro di stampa,
 finestra "Informazioni", finestra "Opzioni" (interruttore dell'associazione file), `<Product>` e `<AssemblyTitle>` (Esplora file >
 Dettagli, Gestione attività) e il nome con cui l'associazione `.pdf` si presenta a Windows (`ApplicationName` in "Apri con").
-**Restano "PDF26"** gli identificatori interni: `AssemblyName` (quindi `PDF26.exe`), namespace `Pdf26`, la cartella delle impostazioni
+L'`AssemblyName` è poi diventato **YumiPDF**, per richiesta esplicita: l'eseguibile si chiama `YumiPDF.exe` (e `YumiPDF.dll`, `YumiPDF.pri`;
+il target di publish che aggiunge il `.pri` usa `$(AssemblyName)`, quindi segue da solo). **Restano "PDF26"** gli identificatori interni: namespace `Pdf26`, la cartella delle impostazioni
 e dei log in `%LocalAppData%/PDF26` (cambiarla farebbe perdere le preferenze e l'elenco dei recenti), la cartella di cache temporanea,
 `ProgId`/chiave di registrazione dell'associazione, le chiavi private scritte nei PDF (`/PDF26`, `/PDF26Id`) e i nomi dei font
 incorporati ("PDF26 Sans/Serif/Mono": un'annotazione già salvata con quelle chiavi resta riconoscibile).

@@ -26,7 +26,7 @@ che va imposto in fase di installazione.
 ## Bug reale trovato pubblicando: crash immediato in Microsoft.UI.Xaml.dll
 
 `dotnet publish` (a differenza di `dotnet build`) non copiava l'output proprio del compilatore XAML -
-`PDF26.pri` (l'indice delle risorse) e ogni `.xbf` (`App.xbf` alla radice, uno per `Views/*.xaml`) - nella
+`YumiPDF.pri` (l'indice delle risorse; `PDF26.pri` finché l'app si chiamava così) e ogni `.xbf` (`App.xbf` alla radice, uno per `Views/*.xaml`) - nella
 cartella di publish, pur essendo già presenti in `$(OutDir)` quando Publish parte (Publish dipende da
 Build). Il risultato pubblicato si avviava e andava subito in crash dentro `Microsoft.UI.Xaml.dll` stesso
 (verificato dal vivo: Visualizzatore eventi di Windows, "Application Error", codice eccezione `0xc000027b`,
@@ -49,6 +49,14 @@ dotnet publish src/App/App.csproj -c Release -r win-x64 --self-contained true -p
 L'output finisce in `src/App/bin/Release/net10.0-windows10.0.19041.0/win-x64/publish/` (~270 MB, self-
 contained: include il runtime .NET e Windows App SDK, non richiede nulla preinstallato sulla macchina di
 destinazione oltre a Windows 10 1809+/11). Zippato (`installer/out/`, ignorato da git) pesa circa 100 MB.
-Nessuna voce nel menu Start, nessun disinstallatore: l'utente estrae la cartella e avvia `PDF26.exe`
+Nessuna voce nel menu Start, nessun disinstallatore: l'utente estrae la cartella e avvia `YumiPDF.exe`
 direttamente. Senza certificato di firma del codice, Windows SmartScreen avviserà comunque al primo avvio -
 non evitabile senza un certificato EV/OV (vedi sopra).
+
+### Zip portable (come è stato fatto per la 0.1.1)
+
+`installer/out/YumiPDF-<versione>-win-x64-portable.zip` (circa 107 MB; la cartella `installer/out/` è ignorata da git). Contiene una
+cartella `YumiPDF/` con l'output del publish **senza i `.pdb`** (simboli di debug) più un `LEGGIMI.txt` (uso, dove stanno le
+preferenze, nota su SmartScreen, licenze: iText è AGPL, quindi indica il repository con i sorgenti). Si crea con `ZipArchive` di
+.NET dopo il `dotnet publish` qui sopra. Verificato estraendolo in una cartella nuova e avviando `YumiPDF.exe` da lì: parte,
+apre un PDF, la finestra "Informazioni" mostra la versione 0.1.1.

@@ -9,10 +9,11 @@
          internal generated type names from the assembly name and mis-sanitizes a leading
          digit, producing broken codegen (verified while scaffolding this project - the
          original "26PDF" AssemblyName triggered CS0246/CS1729 in WinRTVtable.g.cs).
-         "PDF26" starts with a letter, so it does not hit that bug. -->
-    <AssemblyName>PDF26</AssemblyName>
+         "YumiPDF" starts with a letter, so it does not hit that bug. (It was "PDF26" until the app was renamed:
+         this is also the name of the exe.) -->
+    <AssemblyName>YumiPDF</AssemblyName>
     <Product>YumiPDF</Product>
-    <!-- The name Explorer (Details) and Task Manager show; the assembly/exe name stays PDF26 (see above). -->
+    <!-- The name Explorer (Details) and Task Manager show; the exe is YumiPDF.exe (AssemblyName, see above). -->
     <AssemblyTitle>YumiPDF</AssemblyTitle>
     <ApplicationIcon>Assets\AppIcon.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
