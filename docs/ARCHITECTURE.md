@@ -536,6 +536,101 @@ Conclusione: una modifica "come Acrobat" richiederebbe una libreria di editing/l
 può offrire al massimo "sostituisci questa riga con un testo in un font a scelta" (e "elimina oggetto").
 Decisione rimandata all'utente.
 
+## Modifica del testo esistente
+
+Richiesta dopo la prova di fattibilità qui sopra: modificare le righe di testo già nella pagina, con **font open source incorporati**
+per i glifi che il PDF non ha. Solo righe (un oggetto testo PDF = una riga, nessun riflusso) e solo testo; le immagini restano
+fuori (vedi ROADMAP).
+
+### Motore (`PdfEngine.Editing`)
+
+- `PdfTextEditing.List(page)` elenca le righe (testo, rettangolo, font, dimensione effettiva, incorporato sì/no), `Replace` e
+  `Remove` le cambiano. Operano sugli oggetti pagina top-level (`FPDFPage_GetObject`) e finiscono con `FPDFPage_GenerateContent`:
+  il file salvato contiene il contenuto rigenerato, e l'eliminazione toglie davvero il testo dal file (test: dopo salvataggio e
+  riapertura la riga non è più estraibile - non è nascosta, perché ricerca e copia la troverebbero).
+- **Quali lettere mancano nel font?** PDFium non ha una chiamata affidabile: `FPDFFont_GetGlyphWidth` restituisce una larghezza
+  anche per glifi assenti da un sottoinsieme (la `/Widths` li elenca tutti), `GetGlyphPath` restituisce per un glifo assente il
+  contorno di `.notdef` (10 segmenti, uguale a quello di una "i" in Liberation: ambiguo) e per i font CID i codici sono indici di
+  glifo. La domanda che conta è "viene disegnato?", quindi `PdfEditingState.FontHasGlyph` la pone a PDFium stesso: crea un oggetto
+  testo con quel font e quel carattere, ne fa il rendering (`FPDFTextObj_GetRenderedBitmap`) e lo confronta con il rendering di un
+  carattere che nessun font ha (U+FFFF, che dà il riquadro `.notdef` del font). Uguale = assente. Provato sul fixture (Q, w, é, Ж,
+  ω assenti, C, i, a, o presenti; Helvetica non incorporato: tutto il WinAnsi presente, cirillico e greco assenti). I caratteri già
+  presenti nella riga originale non si controllano (si vedono già). Le risposte per i font di ripiego si ricordano per documento.
+- Nessuna lettera mancante: `FPDFText_SetText` **sul posto** (stesso font, stessa posizione). Altrimenti la riga è **riscritta**:
+  nuovo oggetto testo (`FPDFPageObj_CreateTextObj`) con il font di ripiego, stessa dimensione, stessa matrice (posizione), stesso
+  colore di riempimento e modo di disegno, inserito alla stessa posizione nell'ordine di disegno. L'intera riga cambia font
+  (scelta dell'utente: non si mescolano font dentro una riga); se nessun font ha un carattere, la riga viene scritta lo stesso e
+  `PdfTextEditResult.MissingCharacters` lo riporta (l'interfaccia lo segnala).
+- **Scelta del font** (`FallbackFonts.Classify`, in ordine di fiducia): (1) le tabelle del file del font incorporato
+  (`SfntInfo`: `OS/2` panose/classe/peso, `head.macStyle`, `post.isFixedPitch`/angolo), (2) il nome, (3) i flag del descrittore.
+  Il caso reale che l'ha imposto: nel PDF da 104 pagine il font è "CIDFont+F2", i flag dicono serif+simbolico (6), il peso
+  3696 - e il file dice sans grassetto (la prima versione, basata sui flag, scriveva il titolo in un serif). Famiglia: Sans,
+  Serif o Mono; stile: regolare/grassetto/corsivo/grassetto corsivo. Catena: `PDF26 <famiglia>` nello stesso stile, poi Noto Sans.
+- **Font incorporati**: `src/PdfEngine/Fonts/`, 12 file `PDF26{Sans,Serif,Mono}-{Regular,Bold,Italic,BoldItalic}.ttf` (derivati da
+  Liberation 2.1.5) e 4 `NotoSans-*.ttf`, tutti **SIL OFL 1.1**, risorse incorporate in `PdfEngine.dll` (e licenze in `Licenses/`
+  accanto all'eseguibile). Ridotti con `fontTools` a: ASCII, Latin-1/Esteso A-B, greco, cirillico, latino esteso additivo (vietnamita),
+  punteggiatura, valute, qualche simbolo - circa 85-100 KB l'uno (1,5 MB in tutto). **Liberation è rinominato**: la OFL riserva il
+  nome "Liberation" alle versioni non modificate e un sottoinsieme è una versione modificata; nelle tabelle `name` (1, 3, 4, 6, 16,
+  17...) "Liberation" è diventato "PDF26" (copyright e licenza restano). Noto Sans non ha nome riservato. Un font caricato con
+  `FPDFText_LoadFont` entra **per intero** nel file: per questo i sottoinsiemi (90 KB per font usato, non 400-600).
+- Un font di ripiego si carica **una volta per documento** (`PdfEditingState`) e si chiude prima del documento.
+
+### Annulla e ripeti per le modifiche al testo
+
+Una riga modificata sul posto si ripristina con `SetText` del testo vecchio. Una riga **riscritta** o **eliminata** ha tolto un
+oggetto dalla pagina: l'oggetto viene **tenuto** (staccato, non distrutto) dal record di annullamento (`PdfEditRecord`) e rimesso
+al suo posto da `Undo`; `Redo` rifà il percorso inverso. Gli oggetti staccati sono registrati in `PdfEditingState`, che li libera
+quando il record viene scartato o, al più tardi, alla chiusura del documento (prima di `FPDF_CloseDocument`: un oggetto non può
+sopravvivere al documento). Provato: annulla/ripeti ripetuti riportano il rendering **identico al pixel** all'originale; chiudere
+il documento prima di scartare il record non va in crash.
+
+### Interfaccia
+
+Nel pannello "Strumenti" i timbri predefiniti sono **ristretti**: i primi due (APPROVATO, RIFIUTATO) sempre visibili, gli altri
+(`MainViewModel.BasicTextStampPresets`/`MoreTextStampPresets`) dietro il pulsante "Mostra altri timbri" / "Mostra meno timbri"
+(chevron). Lo stato si ricorda fra le sessioni (`AppSettings.MoreStampsExpanded`); al primo avvio è ristretto.
+
+`PdfTextEditLayer` (un `Canvas` sopra il testo di ogni pagina, sotto quello delle annotazioni): con "Modifica testo" attivo mostra
+una cornice tenue su ogni riga; clic = selezione (cornice accent), doppio clic/Invio/F2 = editor in un flyout (testo, font del
+documento, "Applica", "Elimina riga"; un testo vuoto elimina), Canc = elimina, Esc = deseleziona. Esclusivo con gli strumenti di
+inserimento (nota, timbro, campi). Le righe si leggono per pagina quando lo strumento si accende (in coda dietro i render, senza
+barra di avanzamento) e si rileggono dopo ogni modifica; dopo una modifica del testo si aggiorna anche l'indice di ricerca della
+pagina. Dopo una riscrittura la barra di stato dice "Riga riscritta con un font incorporato dall'app..." e, se serve, quali
+caratteri non hanno glifo. **Verificato dal vivo** (fixture e PDF reale da 104 pagine): righe con cornice, Invio apre l'editor,
+riscrittura con lettere assenti (disegnate correttamente, stesso colore e posizione), eliminazione, annulla/ripeti da tastiera.
+Il doppio clic con il mouse simulato dallo script era troppo lento per essere riconosciuto come doppio clic (400 ms fra i
+clic): provato con Invio, che apre lo stesso editor.
+
+## Annulla e ripeti
+
+`MainViewModel.Undo.cs`: due pile di `UndoEntry` (descrizione, `Undo`, `Redo`, risorsa da liberare, tag), massimo 100, azzerate
+quando un altro documento sostituisce quello aperto. Pulsanti "Annulla"/"Ripeti" in barra (tooltip con la descrizione), **visibili solo con il pannello
+"Strumenti" aperto** (`IsToolsPaneOpen`), e Ctrl+Z, Ctrl+Y, Ctrl+Maiusc+Z. Le scorciatoie sono `KeyboardAccelerator` della
+griglia radice, **non** dei pulsanti: l'acceleratore di un pulsante nascosto non scatta (provato: con il pannello chiuso Ctrl+Z non
+faceva nulla). Valgono in tutta la finestra, **ma dentro una casella di testo vince la casella** - provato con la nota: Ctrl+Z annulla
+le lettere digitate, non il documento.
+**Aspetto dei pulsanti riapparsi**: un pulsante della barra nascosto (`Collapsed`) e poi mostrato resta con l'aspetto *attivo* anche se
+il comando lo disabilita (`IsEnabled` è giusto - lo conferma UI Automation - ma lo stato visivo "Disabled" non viene dipinto; si
+vedeva solo senza che nulla toccasse l'interfaccia, perché leggere l'albero di UI Automation lo risolveva da solo). Non bastano né
+un `IsEnabled` legato esplicitamente, né invertirlo e rimetterlo; `x:Load` non è disponibile sul radice di una `Window`. Funziona
+`MainWindow.RefreshUndoRedoAppearance` all'apertura del pannello: `VisualStateManager.GoToState` ("Normal"/"Disabled") più
+un'invalidazione forzata (Opacity 0,99 -> 1, `InvalidateArrange`, `UpdateLayout`). Verificato misurando i pixel del testo (grigio
+163, attivo 27) dopo apertura, inserimento, annulla e ripeti. Le azioni si eseguono in coda
+(`_undoGate`) e passano dalla stessa coda di render/modifiche di pagina (`EditPageAsync`), che segnala il fallimento: se un
+annullamento fallisce la voce viene scartata e la barra di stato lo dice.
+- **Note e timbri**: le annotazioni si indirizzano per **identità** (`/PDF26Id`, voce privata scritta alla prima modifica;
+  `PdfEditableAnnotations.EnsureId/SetId/IndexOfId`), non per indice, perché eliminare e rimettere cambia la posizione delle
+  altre. Inserimento: annulla = elimina, ripeti = ricrea dalla *ricetta* (nota con testo; timbro testuale con testo, colore e data;
+  timbro immagine con i pixel). Spostamento/ridimensionamento e testo della nota: il valore prima/dopo. Eliminazione: annulla =
+  ricrea dalla ricetta nel rettangolo di prima, con la stessa identità. Eliminare una nota vuota appena creata (editor chiuso senza
+  scrivere) annulla la creazione invece di lasciare due voci.
+- **Limite**: un timbro che era già nel file (non fatto da questa sessione) non ha ricetta, quindi la sua eliminazione **non si
+  può annullare**; invece di lasciare voci che indirizzano le annotazioni per posizione la cronologia si azzera e la barra di
+  stato lo dice. (Una nota estranea si ricrea dal testo, perdendo colore e autore.)
+- **Campi modulo aggiunti** (in memoria fino al salvataggio): inserimento, spostamento, proprietà, eliminazione: lavoro in memoria,
+  senza PDFium. **Non coperti**: i valori scritti nei campi di un modulo compilato (il pannello "Compila modulo", che ha già
+  l'annulla delle sue caselle di testo) e il salvataggio.
+
 ## File recenti
 
 Pulsante "Recenti" in barra (accanto ad "Apri...") che apre un **pannello della barra laterale** (all'inizio era un menu

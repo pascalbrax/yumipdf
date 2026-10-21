@@ -107,6 +107,10 @@ public sealed partial class MainWindow : Window
         {
             RevealCurrentBookmark();
         }
+        else if (e.PropertyName == nameof(MainViewModel.IsToolsPaneOpen) && ViewModel.IsToolsPaneOpen)
+        {
+            RefreshUndoRedoAppearance();
+        }
         else if (e.PropertyName == nameof(MainViewModel.Thumbnails))
         {
             ThumbnailStrip.SetSource(ViewModel.Thumbnails);
@@ -398,6 +402,9 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    private void OnToggleMoreStampsClicked(object sender, RoutedEventArgs e)
+        => ViewModel.AreMoreStampsExpanded = !ViewModel.AreMoreStampsExpanded;
+
     private void OnClearRecentClicked(object sender, RoutedEventArgs e) => ViewModel.ClearRecent();
 
     private async void OnOpenClicked(object sender, RoutedEventArgs e)
@@ -684,6 +691,44 @@ public sealed partial class MainWindow : Window
         var pixels = await decoder.GetPixelDataAsync(
             BitmapPixelFormat.Bgra8, BitmapAlphaMode.Straight, transform, ExifOrientationMode.IgnoreExifOrientation, ColorManagementMode.DoNotColorManage);
         return new ImageStampData(pixels.DetachPixelData(), (int)transform.ScaledWidth, (int)transform.ScaledHeight, file.Name);
+    }
+
+    /// <summary>
+    /// The undo/redo buttons are collapsed while the Strumenti panel is closed, and one that is shown again keeps looking
+    /// enabled even though it is not (the command says it cannot run; the disabled look is just not applied after being
+    /// collapsed). Moving the control to the right visual state by hand once it is shown fixes the look; the command binding keeps
+    /// IsEnabled right, and the control follows it from there on.
+    /// </summary>
+    private void RefreshUndoRedoAppearance()
+        => DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        {
+            foreach (var (button, canExecute) in new[] { ((Control)UndoButton, ViewModel.CanUndo), (RedoButton, ViewModel.CanRedo) })
+            {
+                Microsoft.UI.Xaml.VisualStateManager.GoToState(button, canExecute ? "Normal" : "Disabled", false);
+                // The new look is not painted until something invalidates the control: nudge it.
+                button.Opacity = 0.99;
+                button.Opacity = 1;
+                button.InvalidateArrange();
+                button.UpdateLayout();
+            }
+        });
+
+    private void OnUndoInvoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
+    {
+        if (ViewModel.UndoCommand.CanExecute(null))
+        {
+            args.Handled = true;
+            ViewModel.UndoCommand.Execute(null);
+        }
+    }
+
+    private void OnRedoInvoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
+    {
+        if (ViewModel.RedoCommand.CanExecute(null))
+        {
+            args.Handled = true;
+            ViewModel.RedoCommand.Execute(null);
+        }
     }
 
     private void OnEscapeInvoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)

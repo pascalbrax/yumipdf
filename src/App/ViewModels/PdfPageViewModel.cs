@@ -51,6 +51,21 @@ public partial class PdfPageViewModel : ObservableObject
 
     public event EventHandler? AnnotationsChanged;
 
+    /// <summary>
+    /// The lines of text on this page that "Modifica testo" can edit (<see cref="PdfEngine.Editing.PdfTextEditing.List"/>),
+    /// or null until they have been read - which only happens once the user turns that tool on, and again after
+    /// each edit while it is on. Replaced wholesale by <see cref="SetTextLines"/>.
+    /// </summary>
+    public IReadOnlyList<PdfEngine.Editing.PdfTextLine>? TextLines { get; private set; }
+
+    public event EventHandler? TextLinesChanged;
+
+    public void SetTextLines(IReadOnlyList<PdfEngine.Editing.PdfTextLine>? lines)
+    {
+        TextLines = lines;
+        TextLinesChanged?.Invoke(this, EventArgs.Empty);
+    }
+
     public void SetAnnotations(IEnumerable<PdfEngine.Annotations.PdfAnnotationInfo> infos)
     {
         Annotations = infos.Select(info => new PageAnnotationViewModel(this, info)).ToList();

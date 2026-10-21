@@ -173,6 +173,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _restoringSettings = true;
         IsThumbnailPanelOpen = _settings.ThumbnailPanelOpen;
         IsBookmarkPanelOpen = _settings.BookmarkPanelOpen;
+        AreMoreStampsExpanded = _settings.MoreStampsExpanded;
         _restoringSettings = false;
         RefreshRecentEntries();
     }

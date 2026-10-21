@@ -99,6 +99,7 @@ public partial class MainViewModel
         OnPropertyChanged(nameof(HasPendingFields));
 
         RefreshDesignItems(pageIndex);
+        PushUndo(DesignFieldEntry("inserimento di un campo modulo", () => RemoveDesignField(field), () => RestoreDesignField(field, _designFields.Count)));
         var item = FindDesignItem(field);
         SelectAnnotation(item);
         if (item is not null)
@@ -115,10 +116,12 @@ public partial class MainViewModel
             return;
         }
 
+        var before = DesignFieldState.Of(field);
         field.Rect = ClampToPage(item.Page, newRect);
         HasUnsavedChanges = true;
         RefreshDesignItems(field.PageIndex);
         SelectAnnotation(FindDesignItem(field));
+        PushDesignFieldChange(field, before, "spostamento di un campo modulo");
     }
 
     /// <summary>Applies the editor's result; returns the reason it was refused (a bad or taken name), or null when applied.</summary>
@@ -135,6 +138,7 @@ public partial class MainViewModel
             return error;
         }
 
+        var before = DesignFieldState.Of(field);
         field.Name = properties.Name.Trim();
         field.Tooltip = properties.Tooltip.Trim();
         field.Required = properties.Required;
@@ -145,6 +149,7 @@ public partial class MainViewModel
         HasUnsavedChanges = true;
         RefreshDesignItems(field.PageIndex);
         SelectAnnotation(FindDesignItem(field));
+        PushDesignFieldChange(field, before, "modifica delle proprietà di un campo modulo");
         return null;
     }
 
@@ -156,10 +161,71 @@ public partial class MainViewModel
         }
 
         SelectAnnotation(null);
+        var position = _designFields.IndexOf(field);
         _designFields.Remove(field);
         OnPropertyChanged(nameof(HasPendingFields));
         RefreshDesignItems(field.PageIndex);
+        PushUndo(DesignFieldEntry("eliminazione di un campo modulo", () => RestoreDesignField(field, position), () => RemoveDesignField(field)));
     }
+
+    // ---- undo support ------------------------------------------------------------------------------
+
+    /// <summary>Everything about a placed field that an edit can change.</summary>
+    private sealed record DesignFieldState(PdfRect Rect, string Name, string Tooltip, bool Required, bool ReadOnly, bool Multiline, double FontSize, bool CheckedByDefault)
+    {
+        public static DesignFieldState Of(DesignField f)
+            => new(f.Rect, f.Name, f.Tooltip, f.Required, f.ReadOnly, f.Multiline, f.FontSize, f.CheckedByDefault);
+
+        public void ApplyTo(DesignField f)
+        {
+            f.Rect = Rect;
+            f.Name = Name;
+            f.Tooltip = Tooltip;
+            f.Required = Required;
+            f.ReadOnly = ReadOnly;
+            f.Multiline = Multiline;
+            f.FontSize = FontSize;
+            f.CheckedByDefault = CheckedByDefault;
+        }
+    }
+
+    private void PushDesignFieldChange(DesignField field, DesignFieldState before, string description)
+    {
+        var after = DesignFieldState.Of(field);
+        if (after == before)
+        {
+            return;
+        }
+
+        PushUndo(DesignFieldEntry(description, () => SetDesignFieldState(field, before), () => SetDesignFieldState(field, after)));
+    }
+
+    private void SetDesignFieldState(DesignField field, DesignFieldState state)
+    {
+        state.ApplyTo(field);
+        HasUnsavedChanges = true;
+        RefreshDesignItems(field.PageIndex);
+    }
+
+    private void RemoveDesignField(DesignField field)
+    {
+        _designFields.Remove(field);
+        HasUnsavedChanges = true;
+        OnPropertyChanged(nameof(HasPendingFields));
+        RefreshDesignItems(field.PageIndex);
+    }
+
+    private void RestoreDesignField(DesignField field, int position)
+    {
+        _designFields.Insert(Math.Clamp(position, 0, _designFields.Count), field);
+        HasUnsavedChanges = true;
+        OnPropertyChanged(nameof(HasPendingFields));
+        RefreshDesignItems(field.PageIndex);
+    }
+
+    /// <summary>A placed field lives only in the app until the save, so its undo is plain in-memory work, nothing for PDFium to do.</summary>
+    private static UndoEntry DesignFieldEntry(string description, Action undo, Action redo)
+        => new(description, () => { undo(); return Task.CompletedTask; }, () => { redo(); return Task.CompletedTask; });
 
     /// <summary>Why <paramref name="name"/> cannot be this field's name, or null if it can. Names must be unique across every field in the document, the ones it already had included.</summary>
     public string? ValidateFieldName(DesignField field, string name)

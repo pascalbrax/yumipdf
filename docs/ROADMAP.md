@@ -51,8 +51,11 @@
 
 ## M3 - Editor / annotazioni avanzate
 - [x] Nota e timbro (testuale con data opzionale, o immagine dell'utente): pannello laterale "Strumenti" (pulsante in barra) + "Salva con nome...", selezione/spostamento/ridimensionamento/eliminazione sulla pagina, avviso di modifiche non salvate - vedi docs/ARCHITECTURE.md "Annotazioni: note e timbri"
-- [ ] Editing di testo/immagini esistenti nella pagina. **Prova di fattibilità fatta** (docs/ARCHITECTURE.md "Annotazioni", ultima sezione): PDFium può sostituire il testo di un oggetto testo, ma solo con i glifi già presenti nel font incorporato (su un documento reale i caratteri mancanti diventano riquadri vuoti) e non esiste alcun riflusso; resta da decidere se accontentarsi di una sostituzione con font di ripiego o aggiungere una libreria
-- [ ] Undo/redo sulle modifiche
+- [x] Modifica del testo già presente (solo riga per riga, nessun riflusso): "Modifica testo" nel pannello "Strumenti"; una riga con lettere che il suo font non ha viene riscritta con un font open source incorporato (Liberation/Noto Sans, SIL OFL, ridotti a latino/greco/cirillico) scelto per somigliare all'originale - vedi docs/ARCHITECTURE.md "Modifica del testo esistente"
+- [ ] Editing di **immagini** esistenti (sposta, ridimensiona, sostituisci, elimina): non richiesto per ora, lo stesso meccanismo (oggetti pagina staccati/reinseriti) dovrebbe bastare
+- [ ] Testo dentro i Form XObject (alcuni produttori avvolgono tutta la pagina in uno): oggi non compare fra le righe modificabili
+- [ ] Caratteri fuori da latino/greco/cirillico (CJK, arabo, ebraico, ...): nessun font incorporato li ha, appaiono come riquadri vuoti (l'app lo segnala)
+- [x] Annulla/Ripeti (Ctrl+Z, Ctrl+Y, pulsanti in barra) per note, timbri, campi modulo aggiunti e modifiche al testo - vedi docs/ARCHITECTURE.md "Annulla e ripeti". Non copre: i valori scritti nei campi di un modulo compilato (il pannello "Compila modulo"), le modifiche di un timbro che era già nel file prima di eliminarlo (non annullabile: la cronologia si azzera)
 
 ## M4 - Distribuzione
 - [ ] Installer MSI/EXE (WiX Toolset o Velopack), firma del codice

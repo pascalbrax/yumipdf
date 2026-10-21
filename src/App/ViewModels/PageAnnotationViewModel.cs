@@ -18,6 +18,7 @@ public sealed class PageAnnotationViewModel
         Rect = info.Rect;
         Contents = info.Contents;
         CanResize = info.CanResize;
+        Id = info.Id;
     }
 
     /// <summary>A form field the user placed and that is not in the document yet - drawn as a placeholder (see <see cref="DesignField"/>).</summary>
@@ -33,6 +34,9 @@ public sealed class PageAnnotationViewModel
     }
 
     public PdfPageViewModel Page { get; }
+
+    /// <summary>The annotation's private identity once the app has touched it (see <c>PdfEditableAnnotations.EnsureId</c>); null before, and for a form field.</summary>
+    public string? Id { get; }
 
     /// <summary>Non-null when this item is a form field being designed rather than an annotation of the document.</summary>
     public DesignField? Field { get; }

@@ -12,6 +12,9 @@ public sealed class AppSettings
     /// <summary>Whether the index (bookmarks) is the content of the left sidebar. Never true together with <see cref="ThumbnailPanelOpen"/>: the two share the sidebar and exclude each other.</summary>
     public bool BookmarkPanelOpen { get; set; }
 
+    /// <summary>Whether the "Strumenti" panel shows every ready-made stamp, not just the first few. Off on a first run; afterwards it stays as the user left it.</summary>
+    public bool MoreStampsExpanded { get; set; }
+
     /// <summary>The documents opened most recently (paths or URLs), newest first - see <c>MainViewModel.RegisterRecent</c>.</summary>
     public List<string> RecentFiles { get; set; } = new();
 }

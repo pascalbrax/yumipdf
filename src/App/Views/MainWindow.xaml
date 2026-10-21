@@ -12,6 +12,13 @@
         <Grid.KeyboardAccelerators>
             <!-- Esc ends a placement tool, or else clears the selected annotation - and does nothing (not even "handled") otherwise. -->
             <KeyboardAccelerator Key="Escape" Invoked="OnEscapeInvoked" />
+            <!--
+                Undo / redo shortcuts live here, not on the toolbar buttons: those are only shown while the Strumenti panel is
+                open, and the accelerator of a collapsed button does not fire. A text box that has focus still keeps Ctrl+Z for itself.
+            -->
+            <KeyboardAccelerator Key="Z" Modifiers="Control" Invoked="OnUndoInvoked" />
+            <KeyboardAccelerator Key="Y" Modifiers="Control" Invoked="OnRedoInvoked" />
+            <KeyboardAccelerator Key="Z" Modifiers="Control,Shift" Invoked="OnRedoInvoked" />
         </Grid.KeyboardAccelerators>
 
         <CommandBar Grid.Row="0" DefaultLabelPosition="Right">
@@ -45,6 +52,13 @@
             -->
             <AppBarToggleButton Icon="Highlight" Label="Strumenti" IsChecked="{x:Bind ViewModel.IsToolsPanelOpen, Mode=TwoWay}"
                                  Visibility="{x:Bind ViewModel.DocumentToolsVisibility, Mode=OneWay}" />
+            <!-- Undo / redo of the edits made to the document (annotations, text, fields): shown only while the Strumenti panel is open. Ctrl+Z, Ctrl+Y and Ctrl+Shift+Z work from anywhere in the window. -->
+            <AppBarButton x:Name="UndoButton" Icon="Undo" Label="Annulla" Command="{x:Bind ViewModel.UndoCommand}"
+                          ToolTipService.ToolTip="{x:Bind ViewModel.UndoToolTip, Mode=OneWay}"
+                          Visibility="{x:Bind ViewModel.IsToolsPaneOpen, Mode=OneWay}" />
+            <AppBarButton x:Name="RedoButton" Icon="Redo" Label="Ripeti" Command="{x:Bind ViewModel.RedoCommand}"
+                          ToolTipService.ToolTip="{x:Bind ViewModel.RedoToolTip, Mode=OneWay}"
+                          Visibility="{x:Bind ViewModel.IsToolsPaneOpen, Mode=OneWay}" />
             <AppBarButton Icon="Save" Label="Salva con nome..." Click="OnSaveAsClicked"
                           Visibility="{x:Bind ViewModel.DocumentToolsVisibility, Mode=OneWay}" />
             <AppBarSeparator />
@@ -115,6 +129,15 @@
                     <ScrollViewer x:Name="ToolsPanel" Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
                                   VerticalScrollBarVisibility="Auto"
                                   Visibility="{x:Bind ViewModel.IsToolsPaneOpen, Mode=OneWay}">
+                        <ScrollViewer.Resources>
+                            <!-- One ready-made text stamp: a button in the stamp's own color. -->
+                            <DataTemplate x:Key="StampPresetTemplate" x:DataType="vm:TextStampPreset">
+                                <Button HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+                                        Tag="{x:Bind}" Click="OnStampPresetClicked"
+                                        Foreground="{x:Bind TextBrush}" FontWeight="SemiBold" Content="{x:Bind Text}"
+                                        ToolTipService.ToolTip="Poi fai clic sulla pagina per inserirlo (Esc per annullare)" />
+                            </DataTemplate>
+                        </ScrollViewer.Resources>
                         <StackPanel Padding="16,12,16,16" Spacing="20">
                             <TextBlock Text="Strumenti" Style="{StaticResource SubtitleTextBlockStyle}" />
 
@@ -133,21 +156,31 @@
 
                             <StackPanel Spacing="8">
                                 <TextBlock Text="Timbri" FontSize="12" Opacity="0.7" />
-                                <ItemsControl ItemsSource="{x:Bind vm:MainViewModel.TextStampPresets}" IsTabStop="False">
+                                <!-- The first stamps are always there; the rest unfold with "Mostra altri timbri" (remembered between sessions). -->
+                                <ItemsControl ItemsSource="{x:Bind vm:MainViewModel.BasicTextStampPresets}" IsTabStop="False"
+                                              ItemTemplate="{StaticResource StampPresetTemplate}">
                                     <ItemsControl.ItemsPanel>
                                         <ItemsPanelTemplate>
                                             <StackPanel Spacing="4" />
                                         </ItemsPanelTemplate>
                                     </ItemsControl.ItemsPanel>
-                                    <ItemsControl.ItemTemplate>
-                                        <DataTemplate x:DataType="vm:TextStampPreset">
-                                            <Button HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
-                                                    Tag="{x:Bind}" Click="OnStampPresetClicked"
-                                                    Foreground="{x:Bind TextBrush}" FontWeight="SemiBold" Content="{x:Bind Text}"
-                                                    ToolTipService.ToolTip="Poi fai clic sulla pagina per inserirlo (Esc per annullare)" />
-                                        </DataTemplate>
-                                    </ItemsControl.ItemTemplate>
                                 </ItemsControl>
+                                <ItemsControl ItemsSource="{x:Bind vm:MainViewModel.MoreTextStampPresets}" IsTabStop="False"
+                                              ItemTemplate="{StaticResource StampPresetTemplate}"
+                                              Visibility="{x:Bind ViewModel.AreMoreStampsExpanded, Mode=OneWay}">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <StackPanel Spacing="4" />
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                </ItemsControl>
+                                <Button HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Background="Transparent" BorderThickness="0"
+                                        Click="OnToggleMoreStampsClicked" AutomationProperties.Name="Mostra altri timbri">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <FontIcon Glyph="{x:Bind ViewModel.MoreStampsToggleGlyph, Mode=OneWay}" FontSize="12" />
+                                        <TextBlock Text="{x:Bind ViewModel.MoreStampsToggleText, Mode=OneWay}" VerticalAlignment="Center" />
+                                    </StackPanel>
+                                </Button>
                                 <CheckBox Content="Aggiungi la data" IsChecked="{x:Bind ViewModel.AddDateToStamps, Mode=TwoWay}" />
                                 <Button HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Click="OnPickStampImageClicked"
                                         AutomationProperties.Name="Timbro con un'immagine">
@@ -156,6 +189,21 @@
                                         <TextBlock Text="Immagine..." VerticalAlignment="Center" />
                                     </StackPanel>
                                 </Button>
+                            </StackPanel>
+
+                            <StackPanel Spacing="8">
+                                <TextBlock Text="Testo del documento" FontSize="12" Opacity="0.7" />
+                                <ToggleButton HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+                                              AutomationProperties.Name="Modifica testo"
+                                              IsChecked="{x:Bind ViewModel.IsTextEditTool, Mode=TwoWay}"
+                                              ToolTipService.ToolTip="Poi fai clic su una riga di testo della pagina (doppio clic per modificarla, Canc per eliminarla)">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <SymbolIcon Symbol="Edit" />
+                                        <TextBlock Text="Modifica testo" VerticalAlignment="Center" />
+                                    </StackPanel>
+                                </ToggleButton>
+                                <TextBlock TextWrapping="Wrap" FontSize="11" Opacity="0.7"
+                                           Text="Seleziona una riga, poi doppio clic (o Invio) per riscriverla, Canc per eliminarla. Ogni riga è a sé: il testo non si riadatta alle righe vicine." />
                             </StackPanel>
 
                             <StackPanel Spacing="8">
@@ -519,6 +567,13 @@
                                             field overlays so a stamp placed over a field is the
                                             thing a click lands on.
                                         -->
+                                        <!--
+                                            Lines of text, while "Modifica testo" is on (PdfTextEditLayer). Below the
+                                            annotation layer: a note or stamp over a line is what a click lands on.
+                                        -->
+                                        <local:PdfTextEditLayer Page="{x:Bind}"
+                                                                 Width="{x:Bind PixelWidth, Mode=OneWay}" Height="{x:Bind PixelHeight, Mode=OneWay}" />
+
                                         <local:PdfAnnotationLayer Page="{x:Bind}"
                                                                    Width="{x:Bind PixelWidth, Mode=OneWay}" Height="{x:Bind PixelHeight, Mode=OneWay}" />
 

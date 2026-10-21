@@ -303,4 +303,44 @@ public class PdfEditableAnnotationsTests
         Assert.False(list.Single(a => a.Kind == PdfAnnotationKind.Note).CanResize);
         Assert.True(list.Single(a => a.Kind == PdfAnnotationKind.Stamp).CanResize);
     }
+
+    [Fact]
+    public void An_annotation_identity_is_given_once_and_follows_the_annotation_when_others_are_removed()
+    {
+        using var document = OpenFixture();
+        using var page = document.GetPage(0);
+        var first = PdfEditableAnnotations.AddNote(page, 100, 100, "uno");
+        var second = PdfEditableAnnotations.AddNote(page, 300, 300, "due");
+        Assert.All(PdfEditableAnnotations.List(page), a => Assert.Null(a.Id));
+
+        var id = PdfEditableAnnotations.EnsureId(page, second);
+        Assert.Equal(id, PdfEditableAnnotations.EnsureId(page, second)); // asked again: the same one
+        Assert.Equal(id, PdfEditableAnnotations.List(page).Single(a => a.Index == second).Id);
+        Assert.Equal(second, PdfEditableAnnotations.IndexOfId(page, id));
+
+        PdfEditableAnnotations.Remove(page, first); // the second one moves up by one
+        Assert.Equal(second - 1, PdfEditableAnnotations.IndexOfId(page, id));
+        Assert.Equal(-1, PdfEditableAnnotations.IndexOfId(page, "inesistente"));
+    }
+
+    [Fact]
+    public void An_annotation_can_be_put_back_under_its_old_identity()
+    {
+        using var document = OpenFixture();
+        using var page = document.GetPage(0);
+        var index = PdfEditableAnnotations.AddNote(page, 120, 220, "testo");
+        var id = PdfEditableAnnotations.EnsureId(page, index);
+
+        PdfEditableAnnotations.Remove(page, index);
+        Assert.Equal(-1, PdfEditableAnnotations.IndexOfId(page, id));
+
+        var again = PdfEditableAnnotations.AddNote(page, 120, 220, "testo");
+        PdfEditableAnnotations.SetId(page, again, id);
+        Assert.Equal(again, PdfEditableAnnotations.IndexOfId(page, id));
+
+        // The identity is written into the file: it survives saving and reopening.
+        using var reopened = PdfDocument.OpenFromBytes(document.SaveToBytes());
+        using var reopenedPage = reopened.GetPage(0);
+        Assert.Equal(id, PdfEditableAnnotations.List(reopenedPage).Single().Id);
+    }
 }

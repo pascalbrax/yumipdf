@@ -293,6 +293,9 @@ public sealed class PdfDocument : IDisposable
             return 0;
         });
 
+    /// <summary>Fonts and detached page objects that editing existing text keeps alive for this document - see <see cref="Editing.PdfEditingState"/>.</summary>
+    internal Editing.PdfEditingState EditingState { get; } = new();
+
     internal IntPtr Handle
     {
         get
@@ -318,6 +321,7 @@ public sealed class PdfDocument : IDisposable
                 return;
             }
 
+            EditingState.DestroyAll();
             PdfiumNative.FPDF_CloseDocument(_handle);
             if (_pinnedData is { IsAllocated: true } pinned)
             {

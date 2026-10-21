@@ -19,6 +19,10 @@ Visualizzatore, editor e compilatore di moduli PDF nativo per Windows 10 e 11.
 - Pannello "Recenti" nella barra laterale con gli ultimi documenti aperti (la barra mostra un solo pannello alla volta: Miniature, Indice, Strumenti, Compila modulo, Cerca, Recenti)
 - Campi di testo e caselle di controllo compilabili che si aggiungono al PDF dal pannello "Strumenti" (nome,
   suggerimento, obbligatorio, sola lettura, multilinea, dimensione del carattere, spuntata di default)
+- Modifica del testo già presente nelle pagine (pannello "Strumenti" > "Modifica testo"): si seleziona una riga, la si
+  riscrive o la si elimina. Se il font del documento (di solito un sottoinsieme) non ha le lettere digitate, la riga
+  è riscritta con un font open source incorporato di aspetto simile (Liberation/Noto Sans, SIL OFL)
+- Annulla/Ripeti (Ctrl+Z, Ctrl+Y; pulsanti in barra con il pannello "Strumenti" aperto) per note, timbri, campi aggiunti e modifiche al testo
 - Pannello "Strumenti" con note e timbri da inserire sulle pagine: nota con testo, timbri testuali (APPROVATO, BOZZA, ... con data opzionale)
   o con un'immagine propria; si selezionano, spostano, ridimensionano (timbri) ed eliminano; "Salva con nome..."
   le scrive nel nuovo file come annotazioni PDF standard (le vedono anche gli altri lettori)
@@ -32,8 +36,7 @@ Visualizzatore, editor e compilatore di moduli PDF nativo per Windows 10 e 11.
 - Indicazione (barra di stato e banner in alto) se il documento aperto si autodichiara PDF/A (letta dai suoi
   metadati XMP - non una validazione completa, vedi [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md))
 
-Le annotazioni avanzate (nota, timbro) e l'installer sono pianificati nelle milestone
-successive - vedi la roadmap.
+L'installer e gli aggiornamenti automatici sono pianificati nelle milestone successive - vedi la roadmap.
 
 ## Requisiti di sviluppo
 
@@ -91,6 +94,9 @@ dotnet run --project src/App/App.csproj -- "https://example.com/file.pdf"
 - PDFium (via `bblanchon.PDFium.Win32`): Apache-2.0
 - CommunityToolkit.Mvvm: MIT
 - System.Security.Cryptography.Pkcs (verifica dell'integrità delle firme digitali): MIT
+- Font incorporati per la modifica del testo, **SIL Open Font License 1.1** (i testi di licenza sono in `Licenses/` accanto
+  all'eseguibile): Liberation 2.1.5 (Sans, Serif, Mono; ridotti a latino/greco/cirillico e *rinominati* "PDF26 ...",
+  perché la OFL riserva il nome "Liberation" alle versioni non modificate) e Noto Sans (ridotto allo stesso modo)
 - iText Core 9 (creazione dei campi modulo): **AGPL-3.0**. Se l'app viene distribuita, l'AGPL impone di offrire anche i
   sorgenti dell'app a chi la riceve, con la stessa licenza; l'alternativa è una licenza commerciale di iText.
   Valutato anche PDFsharp (MIT): non può creare campi, i costruttori sono `internal`

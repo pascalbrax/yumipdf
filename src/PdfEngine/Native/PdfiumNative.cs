@@ -601,4 +601,89 @@ internal static class PdfiumNative
 
     [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
     public static extern bool FPDFPage_GenerateContent(IntPtr page);
+
+    // ---- Editing existing text objects, and embedding a font for them (M3) ------------------
+
+    public const int FPDF_FONT_TYPE1 = 1;
+    public const int FPDF_FONT_TRUETYPE = 2;
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern IntPtr FPDFTextObj_GetFont(IntPtr textObject);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern bool FPDFTextObj_GetFontSize(IntPtr textObject, out float size);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern int FPDFTextObj_GetTextRenderMode(IntPtr textObject);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern bool FPDFTextObj_SetTextRenderMode(IntPtr textObject, int renderMode);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern UIntPtr FPDFFont_GetBaseFontName(IntPtr font, [Out] byte[]? buffer, UIntPtr length);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern UIntPtr FPDFFont_GetFamilyName(IntPtr font, [Out] byte[]? buffer, UIntPtr length);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern int FPDFFont_GetIsEmbedded(IntPtr font);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern int FPDFFont_GetFlags(IntPtr font);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern int FPDFFont_GetWeight(IntPtr font);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern bool FPDFFont_GetItalicAngle(IntPtr font, out int angle);
+
+    /// <summary>The font's decoded file data when it is embedded (otherwise the substitute font's); <paramref name="outLength"/> is the size needed.</summary>
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern bool FPDFFont_GetFontData(IntPtr font, [Out] byte[]? buffer, UIntPtr bufferLength, out UIntPtr outLength);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern bool FPDFFont_GetGlyphWidth(IntPtr font, uint glyph, float fontSize, out float width);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern IntPtr FPDFFont_GetGlyphPath(IntPtr font, uint glyph, float fontSize);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern int FPDFGlyphPath_CountGlyphSegments(IntPtr glyphPath);
+
+    /// <summary>Loads (and embeds, whole) a TrueType/Type1 font into the document. <paramref name="data"/> is copied.</summary>
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern IntPtr FPDFText_LoadFont(IntPtr document, byte[] data, uint size, int fontType, bool cid);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern void FPDFFont_Close(IntPtr font);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern IntPtr FPDFPageObj_CreateTextObj(IntPtr document, IntPtr font, float fontSize);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern bool FPDFPageObj_GetMatrix(IntPtr pageObject, out FS_MATRIX matrix);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern bool FPDFPageObj_GetFillColor(IntPtr pageObject, out uint r, out uint g, out uint b, out uint a);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern bool FPDFPage_InsertObjectAtIndex(IntPtr page, IntPtr pageObject, UIntPtr index);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern bool FPDFPage_RemoveObject(IntPtr page, IntPtr pageObject);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern IntPtr FPDFTextObj_GetRenderedBitmap(IntPtr document, IntPtr page, IntPtr textObject, float scale);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern IntPtr FPDFBitmap_GetBuffer(IntPtr bitmap);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern int FPDFBitmap_GetWidth(IntPtr bitmap);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern int FPDFBitmap_GetHeight(IntPtr bitmap);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern int FPDFBitmap_GetStride(IntPtr bitmap);
 }

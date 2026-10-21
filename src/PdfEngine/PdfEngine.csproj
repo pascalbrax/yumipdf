@@ -23,4 +23,11 @@
     <InternalsVisibleTo Include="PdfEngine.Tests" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Open-source fallback fonts (SIL OFL 1.1; see Fonts/LICENSE-*.txt), embedded so the exe stays self-contained.
+         Used to rewrite a line of text whose own font lacks a glyph the user typed - see Editing/PdfTextEditing.cs. -->
+    <EmbeddedResource Include="Fonts\*.ttf" LogicalName="PdfEngine.Fonts.%(Filename)%(Extension)" />
+    <EmbeddedResource Include="Fonts\LICENSE-*.txt;Fonts\AUTHORS-*.txt" LogicalName="PdfEngine.Fonts.%(Filename)%(Extension)" />
+  </ItemGroup>
+
 </Project>

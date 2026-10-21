@@ -44,6 +44,8 @@
   <ItemGroup>
     <!-- Also shipped next to the exe: AppWindow.SetIcon (see Services/WindowIcon) loads it from disk at runtime. -->
     <Content Include="Assets\AppIcon.ico" CopyToOutputDirectory="PreserveNewest" />
+    <!-- The fonts bundled in PdfEngine are SIL OFL: their license texts travel with the app (also embedded in PdfEngine.dll). -->
+    <Content Include="..\PdfEngine\Fonts\LICENSE-*.txt;..\PdfEngine\Fonts\AUTHORS-*.txt" Link="Licenses\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

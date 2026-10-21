@@ -24,7 +24,8 @@ public enum PdfAnnotationKind
 /// <param name="Index">Position in the page's annotation list - what the other methods take. Removing an annotation shifts the ones after it, so read the list again after a removal.</param>
 /// <param name="Contents">The note's text (<c>/Contents</c>); empty for a stamp.</param>
 /// <param name="CanResize">Whether <see cref="PdfEditableAnnotations.SetRect"/> may change the size, not just the position: true only for stamps this library made (see the class remarks - a foreign stamp's appearance can misbehave when enlarged).</param>
-public sealed record PdfAnnotationInfo(int Index, PdfAnnotationKind Kind, PdfRect Rect, string Contents, bool CanResize);
+/// <param name="Id">The private identity (<c>/PDF26Id</c>) given to an annotation the app has touched, which - unlike <paramref name="Index"/> - survives other annotations being added or removed; null until then (see <see cref="PdfEditableAnnotations.EnsureId"/>).</param>
+public sealed record PdfAnnotationInfo(int Index, PdfAnnotationKind Kind, PdfRect Rect, string Contents, bool CanResize, string? Id = null);
 
 /// <summary>
 /// Notes and stamps as ordinary PDF annotations (<c>/Subtype /Text</c> and <c>/Stamp</c>): other
@@ -64,6 +65,9 @@ public static class PdfEditableAnnotations
 
     /// <summary>The private entry that marks a stamp as ours: its appearance is built so that resizing it is safe.</summary>
     private const string OwnStampKey = "PDF26";
+
+    /// <summary>The private entry holding an annotation's identity, for undo - see <see cref="EnsureId"/>.</summary>
+    private const string IdKey = "PDF26Id";
 
     /// <summary>The page's notes and stamps (nothing else: not links, form widgets, highlights or popups), in list order.</summary>
     public static IReadOnlyList<PdfAnnotationInfo> List(PdfPage page)
@@ -106,7 +110,8 @@ public static class PdfEditableAnnotations
                         kind.Value,
                         new PdfRect(rect.Left, rect.Bottom, rect.Right, rect.Top),
                         kind == PdfAnnotationKind.Note ? ReadString(annot, "Contents") : string.Empty,
-                        CanResize: kind == PdfAnnotationKind.Stamp && ReadString(annot, OwnStampKey).Length > 0));
+                        CanResize: kind == PdfAnnotationKind.Stamp && ReadString(annot, OwnStampKey).Length > 0,
+                        Id: ReadString(annot, IdKey) is { Length: > 0 } id ? id : null));
                 }
                 finally
                 {
@@ -340,6 +345,87 @@ public static class PdfEditableAnnotations
             {
                 PdfiumNative.FPDFPage_CloseAnnot(annot);
             }
+        });
+    }
+
+    /// <summary>
+    /// The identity of annotation <paramref name="index"/>, given one first if it has none (a private <c>/PDF26Id</c> entry, which
+    /// other readers ignore). Undo addresses annotations by identity, because deleting one and putting it back changes the
+    /// positions of the others.
+    /// </summary>
+    public static string EnsureId(PdfPage page, int index)
+    {
+        ArgumentNullException.ThrowIfNull(page);
+        return PdfiumRuntime.Invoke(() =>
+        {
+            var annot = Open(page, index);
+            try
+            {
+                if (ReadString(annot, IdKey) is { Length: > 0 } existing)
+                {
+                    return existing;
+                }
+
+                var id = Guid.NewGuid().ToString("N");
+                SetStringOrThrow(annot, IdKey, id);
+                return id;
+            }
+            finally
+            {
+                PdfiumNative.FPDFPage_CloseAnnot(annot);
+            }
+        });
+    }
+
+    /// <summary>Gives annotation <paramref name="index"/> a known identity: used to put back an annotation under the one it had.</summary>
+    public static void SetId(PdfPage page, int index, string id)
+    {
+        ArgumentNullException.ThrowIfNull(page);
+        ArgumentException.ThrowIfNullOrEmpty(id);
+        PdfiumRuntime.Invoke(() =>
+        {
+            var annot = Open(page, index);
+            try
+            {
+                SetStringOrThrow(annot, IdKey, id);
+                return 0;
+            }
+            finally
+            {
+                PdfiumNative.FPDFPage_CloseAnnot(annot);
+            }
+        });
+    }
+
+    /// <summary>The current index of the annotation with identity <paramref name="id"/>, or -1 if the page has none.</summary>
+    public static int IndexOfId(PdfPage page, string id)
+    {
+        ArgumentNullException.ThrowIfNull(page);
+        return PdfiumRuntime.Invoke(() =>
+        {
+            var count = PdfiumNative.FPDFPage_GetAnnotCount(page.Handle);
+            for (var index = 0; index < count; index++)
+            {
+                var annot = PdfiumNative.FPDFPage_GetAnnot(page.Handle, index);
+                if (annot == IntPtr.Zero)
+                {
+                    continue;
+                }
+
+                try
+                {
+                    if (ReadString(annot, IdKey) == id)
+                    {
+                        return index;
+                    }
+                }
+                finally
+                {
+                    PdfiumNative.FPDFPage_CloseAnnot(annot);
+                }
+            }
+
+            return -1;
         });
     }
 
