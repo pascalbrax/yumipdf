@@ -5,6 +5,18 @@
 
 Visualizzatore, editor e compilatore di moduli PDF nativo per Windows 10 e 11.
 
+## Screenshot
+
+Un documento con la barra delle miniature (Cover Flow verticale a sinistra):
+
+![Documento con le miniature](docs/screenshots/pdf-e-miniature.png)
+
+Il pannello "Strumenti" (note, timbri, modifica del testo, campi modulo) e la finestra "Informazioni":
+
+![Pannello Strumenti e finestra Informazioni](docs/screenshots/strumenti-e-informazioni.png)
+
+(Il documento mostrato è un esempio generato per l'occasione.)
+
 ## Funzionalità (stato attuale - vedi [docs/ROADMAP.md](docs/ROADMAP.md))
 
 - Apertura da riga di comando di file locali, percorsi UNC di rete e URL HTTP/HTTPS pubblici
