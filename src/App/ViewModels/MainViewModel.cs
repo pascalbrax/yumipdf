@@ -174,6 +174,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         IsThumbnailPanelOpen = _settings.ThumbnailPanelOpen;
         IsBookmarkPanelOpen = _settings.BookmarkPanelOpen;
         AreMoreStampsExpanded = _settings.MoreStampsExpanded;
+        IsSnapToGridEnabled = _settings.SnapToGrid;
         _restoringSettings = false;
         RefreshRecentEntries();
     }

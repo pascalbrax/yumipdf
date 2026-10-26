@@ -8,7 +8,9 @@
     xmlns:local="using:Pdf26.Views"
     mc:Ignorable="d">
 
-    <Grid RowDefinitions="Auto,*,Auto">
+    <!-- The root grid carries the window-wide shortcuts (Esc, Ctrl+Z, Ctrl+Y). KeyboardAcceleratorPlacementMode="Hidden": WinUI would otherwise show
+         a small "Esc" tooltip for them wherever the mouse rests over the window - the whole grid is hover-able. A shortcut on a button keeps its tip. -->
+    <Grid RowDefinitions="Auto,*,Auto" KeyboardAcceleratorPlacementMode="Hidden">
         <Grid.KeyboardAccelerators>
             <!-- Esc ends a placement tool, or else clears the selected annotation - and does nothing (not even "handled") otherwise. -->
             <KeyboardAccelerator Key="Escape" Invoked="OnEscapeInvoked" />
@@ -226,6 +228,8 @@
                                         <TextBlock Text="Casella di controllo" VerticalAlignment="Center" />
                                     </StackPanel>
                                 </ToggleButton>
+                                <CheckBox Content="Aggancia alla griglia" IsChecked="{x:Bind ViewModel.IsSnapToGridEnabled, Mode=TwoWay}"
+                                          ToolTipService.ToolTip="Mostra una griglia di punti (uno ogni 10 pt) sulle pagine e aggancia alla griglia campi, note e timbri quando li inserisci, sposti o ridimensioni: più facile allineare più campi uno sotto l'altro" />
                                 <TextBlock TextWrapping="Wrap" FontSize="11" Opacity="0.7"
                                            Text="I campi vengono scritti nel file quando lo salvi con &quot;Salva con nome...&quot;: il documento salvato si riapre con i campi già compilabili." />
                             </StackPanel>
@@ -451,6 +455,10 @@
                                         Width="{x:Bind PixelWidth, Mode=OneWay}" Height="{x:Bind PixelHeight, Mode=OneWay}">
                                     <Grid>
                                         <Image Source="{x:Bind Bitmap, Mode=OneWay}" Stretch="Fill" />
+
+                                        <!-- The dotted alignment grid, only while "Aggancia alla griglia" is on (PdfGridLayer). -->
+                                        <local:PdfGridLayer Page="{x:Bind}" IsHitTestVisible="False"
+                                                            Width="{x:Bind PixelWidth, Mode=OneWay}" Height="{x:Bind PixelHeight, Mode=OneWay}" />
 
                                         <!--
                                             Drag-to-select text: a transparent layer, hit-test

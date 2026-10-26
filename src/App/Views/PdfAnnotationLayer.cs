@@ -411,8 +411,8 @@ public sealed class PdfAnnotationLayer : Canvas
 
         _dragMoved = true;
         var box = _boxes[annotation];
-        var left = Math.Clamp(_dragOriginLeft + dx, 0, Math.Max(0, page.PixelWidth - box.Width));
-        var top = Math.Clamp(_dragOriginTop + dy, 0, Math.Max(0, page.PixelHeight - box.Height));
+        var left = Math.Clamp(Snapped(_dragOriginLeft + dx), 0, Math.Max(0, page.PixelWidth - box.Width));
+        var top = Math.Clamp(Snapped(_dragOriginTop + dy), 0, Math.Max(0, page.PixelHeight - box.Height));
         SetLeft(box, left);
         SetTop(box, top);
         if (_handles.TryGetValue(annotation, out var handle))
@@ -421,6 +421,22 @@ public sealed class PdfAnnotationLayer : Canvas
         }
 
         e.Handled = true;
+    }
+
+    /// <summary>
+    /// With "Aggancia alla griglia" on, a coordinate (pixels from the page's top-left) goes to the nearest grid point: the same
+    /// grid <see cref="PdfGridLayer"/> draws and <see cref="PageGrid"/> defines in PDF points, scaled by the zoom. The dragged corner
+    /// is what snaps: the top-left one when moving, the bottom-right one when resizing.
+    /// </summary>
+    private double Snapped(double pixels)
+    {
+        if (Page is not { } page || !page.Owner.IsGridActive)
+        {
+            return pixels;
+        }
+
+        var step = PageGrid.StepPt * page.Owner.Zoom;
+        return Math.Round(pixels / step, MidpointRounding.AwayFromZero) * step;
     }
 
     private void OnHandlePointerMoved(object sender, PointerRoutedEventArgs e)
@@ -437,8 +453,8 @@ public sealed class PdfAnnotationLayer : Canvas
         if (!annotation.KeepProportions)
         {
             // A text field stretches freely: the corner follows the pointer in both directions.
-            box.Width = Math.Clamp(point.X - _dragOriginLeft, 16, Math.Max(16, page.PixelWidth - _dragOriginLeft));
-            box.Height = Math.Clamp(point.Y - _dragOriginTop, 12, Math.Max(12, page.PixelHeight - _dragOriginTop));
+            box.Width = Math.Clamp(Snapped(point.X) - _dragOriginLeft, 16, Math.Max(16, page.PixelWidth - _dragOriginLeft));
+            box.Height = Math.Clamp(Snapped(point.Y) - _dragOriginTop, 12, Math.Max(12, page.PixelHeight - _dragOriginTop));
             if (_handles.TryGetValue(annotation, out var freeHandle))
             {
                 PositionHandle(freeHandle, _dragOriginLeft, _dragOriginTop, box.Width, box.Height);
@@ -451,7 +467,7 @@ public sealed class PdfAnnotationLayer : Canvas
         // Scale about the top-left corner, keeping the proportions: the width follows the pointer.
         var ratio = _dragHeight / _dragWidth;
         var maxWidth = Math.Min(page.PixelWidth - _dragOriginLeft, (page.PixelHeight - _dragOriginTop) / ratio);
-        var width = Math.Clamp(point.X - _dragOriginLeft, 16, Math.Max(16, maxWidth));
+        var width = Math.Clamp(Snapped(point.X) - _dragOriginLeft, 16, Math.Max(16, maxWidth));
         box.Width = width;
         box.Height = width * ratio;
         if (_handles.TryGetValue(annotation, out var handle))

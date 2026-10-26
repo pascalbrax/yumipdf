@@ -37,6 +37,8 @@ Il pannello "Strumenti" (note, timbri, modifica del testo, campi modulo) e la fi
 - Modifica del testo già presente nelle pagine (pannello "Strumenti" > "Modifica testo"): si seleziona una riga, la si
   riscrive o la si elimina. Se il font del documento (di solito un sottoinsieme) non ha le lettere digitate, la riga
   è riscritta con un font open source incorporato di aspetto simile (Liberation/Noto Sans, SIL OFL)
+- "Aggancia alla griglia": una griglia di punti (ogni 10 pt) sulle pagine, a cui campi modulo, note e timbri si agganciano, per
+  allineare facilmente più campi uno sotto l'altro
 - Annulla/Ripeti (Ctrl+Z, Ctrl+Y; pulsanti in barra con il pannello "Strumenti" aperto) per note, timbri, campi aggiunti e modifiche al testo
 - Pannello "Strumenti" con note e timbri da inserire sulle pagine: nota con testo, timbri testuali (APPROVATO, BOZZA, ... con data opzionale)
   o con un'immagine propria; si selezionano, spostano, ridimensionano (timbri) ed eliminano; "Salva con nome..."

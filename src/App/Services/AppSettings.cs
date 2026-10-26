@@ -15,6 +15,9 @@ public sealed class AppSettings
     /// <summary>Whether the "Strumenti" panel shows every ready-made stamp, not just the first few. Off on a first run; afterwards it stays as the user left it.</summary>
     public bool MoreStampsExpanded { get; set; }
 
+    /// <summary>Whether placing and moving things on a page snaps them to the dotted grid ("Aggancia alla griglia"). Off on a first run; afterwards it stays as the user left it.</summary>
+    public bool SnapToGrid { get; set; }
+
     /// <summary>The documents opened most recently (paths or URLs), newest first - see <c>MainViewModel.RegisterRecent</c>.</summary>
     public List<string> RecentFiles { get; set; } = new();
 }

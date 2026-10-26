@@ -93,7 +93,14 @@ public partial class MainViewModel
         var (width, height) = kind == PdfFieldKind.Text
             ? (DefaultTextFieldWidth, DefaultTextFieldHeight)
             : (DefaultCheckBoxSize, DefaultCheckBoxSize);
-        var field = new DesignField(pageIndex, kind, NextFieldName(kind), ClampToPage(page, new PdfRect(xPt - width / 2, yPt - height / 2, xPt + width / 2, yPt + height / 2)));
+        var placedRect = new PdfRect(xPt - width / 2, yPt - height / 2, xPt + width / 2, yPt + height / 2);
+        if (IsGridActive)
+        {
+            // Top-left corner on the grid: stacked fields then share their left edge and sit a whole number of steps apart.
+            placedRect = PageGrid.SnapPosition(placedRect, page.PointHeight);
+        }
+
+        var field = new DesignField(pageIndex, kind, NextFieldName(kind), ClampToPage(page, placedRect));
         _designFields.Add(field);
         HasUnsavedChanges = true;
         OnPropertyChanged(nameof(HasPendingFields));

@@ -658,6 +658,34 @@ riscrittura con lettere assenti (disegnate correttamente, stesso colore e posizi
 Il doppio clic con il mouse simulato dallo script era troppo lento per essere riconosciuto come doppio clic (400 ms fra i
 clic): provato con Invio, che apre lo stesso editor.
 
+## Griglia di allineamento ("Aggancia alla griglia")
+
+Richiesta per allineare più campi modulo messi uno sotto l'altro. Casella "Aggancia alla griglia" nel pannello "Strumenti", sotto
+i campi modulo (`MainViewModel.IsSnapToGridEnabled`, ricordata fra le sessioni in `AppSettings.SnapToGrid`). Attiva: (1) una **griglia
+di punti** si disegna sopra ogni pagina e (2) **campi, note e timbri si agganciano** alla griglia quando si inseriscono, si
+spostano o si ridimensionano. Scelte dell'utente: passo fisso di **10 pt** (circa 3,5 mm, qualunque zoom), vale per tutti e tre i tipi.
+- **Solo con il pannello "Strumenti" aperto** (`MainViewModel.IsGridActive` = opzione attiva **e** pannello aperto): la casella sta
+  nel pannello, e a pannello chiuso non ci sarebbe modo visibile di spegnere una griglia rimasta sulle pagine. Chiuso il pannello
+  (o aperto un altro, che lo chiude) i punti spariscono e l'aggancio si ferma; la scelta resta salvata e torna riaprendo il pannello.
+  Misurato sui pixel dello schermo: area bianca senza punti prima, con punti a pannello aperto, senza a pannello chiuso, di nuovo con
+  punti riaperto.
+- **La griglia** (`PdfEngine.Annotations.PageGrid`, testata in `PageGridTests`): punti ogni 10 pt contati dall'**angolo in alto a
+  sinistra** della pagina (non dal basso a sinistra dell'origine PDF: "il bordo superiore è sulla griglia" vuol dire la stessa cosa su
+  un A4 da 842 pt e su ogni altro formato). A ciò che si aggancia è l'**angolo in alto a sinistra** (inserimento e spostamento) e
+  l'angolo in basso a destra (ridimensionamento): tre campi inseriti con clic imprecisi finiscono con lo stesso bordo sinistro e
+  separati da un numero intero di passi.
+- **Disegno** (`PdfGridLayer`, uno per pagina, non cliccabile, mai scritto nel PDF): un solo `Path` per pagina con una riga per ogni
+  fila di punti e un tratteggio che trasforma ogni trattino in un punto (un documento di cento pagine costa cento elementi, non mezzo
+  milione di ellissi). Sotto 5 px fra un punto e l'altro (zoom molto ridotto) non si disegna nulla, ma l'aggancio resta.
+- **Aggancio** durante il trascinamento: `PdfAnnotationLayer.Snapped`, in pixel, con lo stesso passo (10 pt x zoom). All'inserimento:
+  un campo (`PlaceDesignField`) si crea già col rettangolo agganciato; una nota o un timbro hanno la misura nota solo a creazione
+  avvenuta, quindi `PlaceAnnotationAsync` li crea sul clic e li sposta subito con `SetRect` (nella stessa operazione, un solo passo di
+  annullamento); il ripeti li ricrea intorno al centro di dove sono finiti, non del clic.
+- Provato dal vivo: punti visibili e nascosti dalla casella, tre campi inseriti con clic spostati di pochi pixel (due allineati,
+  il terzo su una colonna vicina perché lo scarto superava mezzo passo), un trascinamento di 9 px che lo porta sulla stessa colonna degli
+  altri, un timbro appoggiato alla griglia, impostazione salvata e tolta. Non provato: il ridimensionamento con il mouse (il codice
+  aggancia il bordo trascinato allo stesso modo, ma non l'ho visto muovere).
+
 ## Annulla e ripeti
 
 `MainViewModel.Undo.cs`: due pile di `UndoEntry` (descrizione, `Undo`, `Redo`, risorsa da liberare, tag), massimo 100, azzerate
@@ -666,6 +694,12 @@ quando un altro documento sostituisce quello aperto. Pulsanti "Annulla"/"Ripeti"
 griglia radice, **non** dei pulsanti: l'acceleratore di un pulsante nascosto non scatta (provato: con il pannello chiuso Ctrl+Z non
 faceva nulla). Valgono in tutta la finestra, **ma dentro una casella di testo vince la casella** - provato con la nota: Ctrl+Z annulla
 le lettere digitate, non il documento.
+**Suggerimento "Esc" che compariva da solo**: le scorciatoie di tutta la finestra (Esc, Ctrl+Z, Ctrl+Y) stanno sulla griglia radice, che
+copre l'intera finestra; WinUI mostra per default un piccolo suggerimento con il testo della scorciatoia (`KeyboardAcceleratorPlacementMode`
+= `Auto`) quando il mouse si ferma sopra un elemento che ne ha una, quindi "Esc" saltava fuori sopra il PDF, la barra del titolo, ovunque
+non ci fosse un altro suggerimento. Risolto con `KeyboardAcceleratorPlacementMode="Hidden"` sulla sola griglia radice: le scorciatoie
+funzionano come prima e i pulsanti con la propria scorciatoia (Cerca, Ctrl+F) mantengono il loro suggerimento. Riprodotto e verificato
+catturando la sola area della finestra con il mouse fermo: prima il popup "Esc" accanto al cursore, dopo niente.
 **Aspetto dei pulsanti riapparsi**: un pulsante della barra nascosto (`Collapsed`) e poi mostrato resta con l'aspetto *attivo* anche se
 il comando lo disabilita (`IsEnabled` è giusto - lo conferma UI Automation - ma lo stato visivo "Disabled" non viene dipinto; si
 vedeva solo senza che nulla toccasse l'interfaccia, perché leggere l'albero di UI Automation lo risolveva da solo). Non bastano né

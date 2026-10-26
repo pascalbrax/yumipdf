@@ -119,6 +119,7 @@ public partial class MainViewModel
     private void NotifyToolsPane()
     {
         OnPropertyChanged(nameof(IsToolsPaneOpen));
+        OnPropertyChanged(nameof(IsGridActive));
         OnPropertyChanged(nameof(IsLeftPaneOpen));
         OnPropertyChanged(nameof(LeftPaneWidth));
     }
@@ -249,6 +250,7 @@ public partial class MainViewModel
         var preset = _pendingTextStamp;
         var image = _pendingImageStamp;
         var addDate = AddDateToStamps;
+        var snap = IsGridActive;
         if (tool == AnnotationTool.None)
         {
             return;
@@ -285,6 +287,16 @@ public partial class MainViewModel
             {
                 var created = AddFromRecipe(page, recipe, xPt, yPt);
                 newId = PdfEditableAnnotations.EnsureId(page, created);
+                if (snap && PdfEditableAnnotations.List(page).FirstOrDefault(a => a.Index == created) is { } info)
+                {
+                    // The size of a note or stamp is only known once it exists: move it so its top-left corner is on the grid.
+                    var snapped = PageGrid.SnapPosition(info.Rect, page.SizeInPoints.Height);
+                    if (snapped != info.Rect)
+                    {
+                        PdfEditableAnnotations.SetRect(page, created, snapped);
+                    }
+                }
+
                 return created;
             }).ConfigureAwait(true);
 
@@ -294,7 +306,12 @@ public partial class MainViewModel
         }
 
         _annotationRecipes[newId] = recipe;
-        PushUndo(AnnotationAddEntry(pageIndex, newId, recipe, xPt, yPt));
+        // Redo recreates it around the center of where it ended up (with snapping, not where the click was).
+        var placedRect = FindAnnotation(pageIndex, index)?.Rect;
+        var (undoX, undoY) = snap && placedRect is { } placed
+            ? ((placed.Left + placed.Right) / 2, (placed.Bottom + placed.Top) / 2)
+            : (xPt, yPt);
+        PushUndo(AnnotationAddEntry(pageIndex, newId, recipe, undoX, undoY));
 
         var created = FindAnnotation(pageIndex, index);
         SelectAnnotation(created);
