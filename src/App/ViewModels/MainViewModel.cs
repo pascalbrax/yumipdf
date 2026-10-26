@@ -840,16 +840,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// someone just typed does not appear to "revert" the next time the whole document
     /// re-renders (e.g. on a zoom change).
     /// </summary>
-    /// <summary>
-    /// The renderer printing must use: identical to what the screen shows, so the user's
-    /// unflattened form entries end up on paper too (see <see cref="RenderPageBgra"/>).
-    /// </summary>
-    public byte[] RenderPageForPrint(int pageIndex, int pixelWidth, int pixelHeight)
-    {
-        var document = _document ?? throw new InvalidOperationException("Nessun documento aperto.");
-        return RenderPageBgra(document, _formFiller, pageIndex, pixelWidth, pixelHeight);
-    }
-
     private static byte[] RenderPageBgra(PdfDocument document, PdfFormFiller? formFiller, int pageIndex, int pixelWidth, int pixelHeight)
     {
         if (formFiller is not null)

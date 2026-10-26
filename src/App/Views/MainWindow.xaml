@@ -25,7 +25,7 @@
             <AppBarButton Icon="OpenFile" Label="Apri..." Click="OnOpenClicked" />
             <!-- Recent documents: a sidebar panel (like Miniature, Indice, Strumenti, Compila modulo and Cerca, it excludes the others). -->
             <AppBarToggleButton Icon="Clock" Label="Recenti" IsChecked="{x:Bind ViewModel.IsRecentPanelOpen, Mode=TwoWay}" />
-            <AppBarButton Icon="Print" Label="Stampa..." Click="OnPrintClicked" />
+            <AppBarButton x:Name="PrintButton" Icon="Print" Label="Stampa..." Click="OnPrintClicked" />
             <AppBarSeparator />
             <AppBarButton Icon="Back" Label="Precedente" Command="{x:Bind ViewModel.PreviousPageCommand}" />
             <AppBarButton Icon="Forward" Label="Successiva" Command="{x:Bind ViewModel.NextPageCommand}" />

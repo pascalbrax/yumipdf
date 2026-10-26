@@ -7,7 +7,7 @@
 - [x] Annotazione evidenziazione (`PdfAnnotationService.AddHighlight`)
 - [x] Lettura campi AcroForm (`PdfFormFiller.ListFields`)
 - [x] Apertura da riga di comando: percorso locale, percorso UNC, URL HTTP/HTTPS pubblico
-- [x] Stampa via GDI classico (dialogo di stampa nativo, intervallo pagine)
+- [x] Stampa con anteprima nel pannello nativo di Windows (Win2D, intervalli di pagine)
 - [x] Viewer minimo (apri, naviga pagine, stampa)
 
 ## M1 - Viewer completo
@@ -46,8 +46,15 @@
 - [ ] Fixture di test AcroForm per `PdfEngine.Tests`: c'è `Fixtures/form-choices.pdf` (combo e liste, generata a mano); mancano ancora campi di testo, checkbox e radio (oggi verificati a mano contro documenti reali non inclusi nel repo)
 
 ## Stampa
-- [x] I campi compilati e non ancora appiattiti vengono stampati (la stampa usa lo stesso render della vista)
-- [ ] Anteprima di stampa nel dialogo - **posticipata**. Percorso individuato: stampa nativa Windows (`PrintManagerInterop` + `Microsoft.UI.Xaml.Printing.PrintDocument`, entrambi presenti in Windows App SDK 2.3.1 - la nota in ARCHITECTURE.md "Stampa: perché non l'API di stampa WinRT" è superata). Prima di iniziare: prova rapida (2-4 h) che il pannello si apra da app WinUI3 non pacchettizzata. Da sistemare comunque, con o senza anteprima: la stampa GDI tiene pinnati i buffer di tutte le pagine per l'intero lavoro (~139 MB/pagina A4 a 600 dpi) e stira la pagina sull'intero foglio ignorando margini e proporzioni
+
+- [x] I campi compilati e non ancora appiattiti vengono stampati tramite l'ambiente moduli della copia di stampa.
+- [x] Anteprima integrata nel pannello nativo (`PrintManagerInterop` + Win2D `CanvasPrintDocument`), opzioni stampante e intervalli, proporzioni e margini corretti, rendering su richiesta e buffer di una pagina alla volta. Copia indipendente del documento per non alterare la sessione durante stampa/annullamento. Vedi ARCHITECTURE.md "Stampa con anteprima integrata".
+- [x] Gestione dell'annullamento e delle chiamate tardive a risorse native già chiuse; invio al driver in background, compreso il dialogo Salva di Microsoft Print to PDF.
+- [x] Collaudo interattivo del pannello, dei moduli in anteprima, del cambio stampante/orientamento e della riapertura dopo Annulla. Verificato l'output PDF delle sole pagine `2,4` nell'ordine corretto (24 ottobre 2026).
+- [x] Test automatici su geometria, intervalli e copia del documento; suite completa: 120 test superati al collaudo del 24 ottobre 2026.
+- [x] [Guida alla stampa](STAMPA.md) con flusso, impostazioni e limiti.
+- [ ] Verifica su più stampanti fisiche/driver e documenti molto lunghi.
+- [ ] Stampa vettoriale (oggi il percorso è raster a 300 dpi con limiti per pagina).
 
 ## M3 - Editor / annotazioni avanzate
 - [x] Nota e timbro (testuale con data opzionale, o immagine dell'utente): pannello laterale "Strumenti" (pulsante in barra) + "Salva con nome...", selezione/spostamento/ridimensionamento/eliminazione sulla pagina, avviso di modifiche non salvate - vedi docs/ARCHITECTURE.md "Annotazioni: note e timbri"
@@ -56,6 +63,12 @@
 - [ ] Testo dentro i Form XObject (alcuni produttori avvolgono tutta la pagina in uno): oggi non compare fra le righe modificabili
 - [ ] Caratteri fuori da latino/greco/cirillico (CJK, arabo, ebraico, ...): nessun font incorporato li ha, appaiono come riquadri vuoti (l'app lo segnala)
 - [x] Annulla/Ripeti (Ctrl+Z, Ctrl+Y, pulsanti in barra) per note, timbri, campi modulo aggiunti e modifiche al testo - vedi docs/ARCHITECTURE.md "Annulla e ripeti". Non copre: i valori scritti nei campi di un modulo compilato (il pannello "Compila modulo"), le modifiche di un timbro che era già nel file prima di eliminarlo (non annullabile: la cronologia si azzera)
+
+## Licenze
+- [x] Licenza del progetto: **AGPL-3.0 o successiva** (`LICENSE`), imposta da iText Core; elenco e testi dei componenti di terze parti in `THIRD-PARTY-NOTICES.md` e `third-party-licenses/`, copiati nel pacchetto in `Licenses/`
+- [x] Pacchetti Windows App SDK ridotti ai componenti usati (via ONNX Runtime/DirectML/Windows AI dal pacchetto)
+- [ ] Windows App SDK e Win2D (contratti Microsoft) rispetto all'AGPL: tensione aperta, vedi `THIRD-PARTY-NOTICES.md` "Punti aperti" (distribuzione framework-dependent, domanda a Microsoft su Win2D, o parere legale)
+- [ ] Intestazioni SPDX (`AGPL-3.0-or-later`) nei file sorgente, se si vuole renderle esplicite file per file
 
 ## M4 - Distribuzione
 - [ ] Installer MSI/EXE (WiX Toolset o Velopack), firma del codice

@@ -23,6 +23,36 @@ Nota: l'installer **non** deve registrare l'associazione con `.pdf` - è una sce
 che l'utente attiva/disattiva dal menu Opzioni dell'app (`Services/FileAssociationService.cs`), non qualcosa
 che va imposto in fase di installazione.
 
+## Distribuzione della stampa con anteprima
+
+La stampa usa `Microsoft.Graphics.Win2D` 1.4.0, referenziato da `src/App`. Distribuire l'intera cartella
+prodotta da `dotnet publish`, con `Microsoft.Graphics.Canvas.dll`, `Microsoft.Graphics.Canvas.Interop.dll`
+e le risorse WinUI: copiare soltanto `YumiPDF.exe` non è sufficiente.
+La finestra Informazioni e il README riportano il componente Win2D e la licenza del pacchetto.
+
+Dopo aver preparato il pacchetto, verificarlo anche dalla cartella estratta: aprire un PDF, richiamare
+Stampa, controllare l'anteprima e annullare; riaprire Stampa e produrre un file con Microsoft Print to PDF.
+Il collaudo della build non sostituisce questa verifica del pacchetto distribuito.
+
+Il pacchetto `YumiPDF-0.1.1-win-x64-portable.zip` in `installer/out/` è stato ricreato con la nuova stampa (verificato
+estraendolo in una cartella nuova: parte, il pannello di stampa si apre e si annulla, la finestra Informazioni è corretta).
+I file ZIP non vengono aggiornati da `dotnet build`: dopo ogni modifica occorre pubblicare nuovamente l'app e ricreare il pacchetto. Per il flusso utente e i limiti
+vedi la [guida alla stampa](../docs/STAMPA.md).
+
+## Pacchetti Windows App SDK ridotti, licenze nel pacchetto
+
+`src/App/App.csproj` non referenzia più l'ombrello `Microsoft.WindowsAppSDK`, ma solo i componenti che servono (`Base`,
+`Foundation`, `InteractiveExperiences`, `WinUI`, `DWrite`). L'ombrello tirava dentro anche Windows AI, Windows ML (ONNX Runtime,
+DirectML) e Widgets, che un visualizzatore PDF non usa e che una build self-contained ridistribuiva: la pubblicazione è passata da
+496 a circa 400 file e da 278 a 192 MB, lo zip da 106 a 75 MB, e con loro sono spariti ONNX Runtime, DirectML e le DLL di Windows AI
+dall'elenco delle licenze da portarsi dietro. WebView2 resta (dipendenza di WinUI). Verificato: build, pubblicazione, avvio dalla
+cartella pubblicata e dallo zip estratto, interfaccia, miniature, finestre, pannello di stampa (Win2D).
+
+`LICENSE`, `THIRD-PARTY-NOTICES.md` e tutta la cartella `third-party-licenses/` vengono copiate nell'output (e quindi nello zip) in
+`Licenses/` (`LICENSE-AGPL-3.0.txt`, `THIRD-PARTY-NOTICES.md`, `Licenses/third-party/...`), insieme ai testi dei font già presenti.
+Se si aggiorna un pacchetto (PDFium, .NET, Windows App SDK...) vanno aggiornati anche i testi in `third-party-licenses/` e le
+versioni in `THIRD-PARTY-NOTICES.md`.
+
 ## Bug reale trovato pubblicando: crash immediato in Microsoft.UI.Xaml.dll
 
 `dotnet publish` (a differenza di `dotnet build`) non copiava l'output proprio del compilatore XAML -
@@ -36,7 +66,9 @@ parte.
 
 Risolto in `src/App/App.csproj` con un target che si aggancia a `ComputeFilesToPublish` (il punto di
 estensione che `dotnet publish` stesso usa per decidere cosa copiare) e aggiunge esplicitamente
-`$(OutDir)**\*.xbf` e `$(OutDir)$(AssemblyName).pri` a `@(ResolvedFileToPublish)`. Verificato dal vivo dopo
+`$(OutDir)**\*.xbf` e `$(OutDir)$(AssemblyName).pri` a `@(ResolvedFileToPublish)`. Il pattern esclude la cartella `publish`
+stessa (che sta sotto `$(OutDir)`): senza l'esclusione, dalla seconda pubblicazione in poi raccoglieva anche i `.xbf` della
+pubblicazione precedente e li copiava in `publish/publish/...` (6 file inutili finiti anche nel primo zip portable). Verificato dal vivo dopo
 la correzione: l'eseguibile pubblicato (`dotnet publish -c Release -r win-x64 --self-contained true`) si
 avvia e resta in esecuzione normalmente.
 

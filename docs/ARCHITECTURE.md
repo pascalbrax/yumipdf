@@ -5,7 +5,7 @@
 ```
 26PDF.slnx
 ├── src/PdfEngine    Libreria .NET pura: binding PDFium + logica documento/pagina/organizzazione/annotazioni/moduli.
-├── src/Printing     Stampa via System.Drawing.Printing (GDI classico). Separata dall'app WinUI3 (vedi sotto).
+├── src/Printing     Copia indipendente del PDF per la stampa, geometria e intervalli di pagine. Nessuna UI.
 ├── src/App          App WinUI3 (Windows App SDK), unpackaged. UI, comando riga di comando, risoluzione sorgenti.
 └── tests/PdfEngine.Tests   Test xUnit su PdfEngine.
 ```
@@ -229,14 +229,71 @@ basta a garantire che l'integrazione con un'app interattiva sia corretta** - i t
 quando c'è un vero ciclo UI (digitare → perdere il focus → renderizzare di nuovo → salvare) in sequenza reale,
 non nell'ordine "pulito" con cui li si testerebbe uno alla volta da codice.
 
-## Stampa: perché non l'API di stampa WinRT nativa
+## Stampa con anteprima integrata
 
-WinUI3 non espone ancora un equivalente diretto di `Windows.UI.Xaml.Printing.PrintDocument` (UWP): il tipo
-WinRT `Windows.Graphics.Printing.PrintDocument.AddPage` richiede `Windows.UI.Xaml.UIElement`, non compatibile
-con `Microsoft.UI.Xaml.UIElement` di WinUI3. Per questo `src/Printing` usa `System.Drawing.Printing`
-(GDI classico via Windows Forms), stabile e maturo, disegnando un bitmap per pagina (via
-`PdfPage.RenderToBgra`) sul contesto grafico di stampa. È in un progetto separato perché
-`UseWinUI` e `UseWindowsForms` nello stesso `.csproj` mandano in conflitto il compilatore XAML.
+La [guida alla stampa](STAMPA.md) descrive il comportamento visibile all'utente. Le responsabilità del
+codice sono suddivise così:
+
+| Componente | Responsabilità |
+| --- | --- |
+| `App/ViewModels/MainViewModel.Printing.cs` | Attende gli aggiornamenti dei moduli e acquisisce lo stato da stampare. |
+| `Printing/PdfPrintSnapshot.cs` | Possiede la copia PDF e il relativo ambiente moduli, indipendenti dal documento aperto. |
+| `Printing/PrintLayout.cs` | Calcola proporzioni, area stampabile, limiti raster e selezione delle pagine. |
+| `App/Services/NativePrintService.cs` | Gestisce pannello nativo, anteprima, invio al driver e durata della sessione. |
+| `tests/PdfEngine.Tests/PrintingTests.cs` | Verifica geometria, intervalli e contenuto della copia di stampa. |
+
+`App/Services/NativePrintService` apre il pannello nativo tramite `PrintManagerInterop.GetForWindow` e
+`ShowPrintUIForWindowAsync`, anche nell'app non pacchettizzata. Il pannello riunisce anteprima, stampante,
+pagine, copie, orientamento, carta, colore e fronte/retro (le opzioni disponibili dipendono dal driver).
+Non ci sono finestre di anteprima aggiuntive o un secondo dialogo di stampa.
+
+La sorgente è un `Microsoft.Graphics.Canvas.Printing.CanvasPrintDocument` (Win2D 1.4.0), invece di una
+collezione di pagine XAML: l'evento `Preview` disegna soltanto la pagina richiesta; `Print` disegna in
+sequenza le pagine selezionate. Il motore PDFium resta il renderer. Anteprima e stampa condividono la
+stessa geometria (`Printing.PrintPlacement`): proporzioni conservate e centratura entro `ImageableRect`,
+anche con margini asimmetrici e carta diversa dal formato originale. Le pagine miste conservano la loro
+forma e vengono adattate al foglio scelto; non si cambia automaticamente orientamento per ogni pagina.
+
+La stampa usa raster a 300 dpi, l'anteprima a 144 dpi; sono comunque limitati sia il numero di pixel sia
+la dimensione massima della texture (20 milioni / 8192 px per la stampa, 3 milioni / 1800 px per
+l'anteprima). Per carta eccezionalmente grande il limite può ridurre la risoluzione. I buffer non vengono
+tenuti pinnati per l'intero lavoro, come avveniva nel percorso GDI precedente. La stampa resta raster,
+non un'esportazione vettoriale del contenuto originale.
+
+Prima dell'apertura del pannello, il view model attende gli aggiornamenti dei moduli e crea un
+`PdfPrintSnapshot`: documento indipendente in memoria con valori, testo modificato e annotazioni
+correnti. Anche i campi appena progettati vengono inclusi nella copia. Il documento aperto non viene
+appiattito, salvato su disco o sostituito. La copia possiede il proprio `PdfFormFiller` per disegnare anche
+le appearance dei moduli che PDFium non rigenera nel normale salvataggio.
+
+La sessione resta referenziata fino a `PrintTask.Completed`. Il rendering usa deferral e annullamento,
+e libera la copia soltanto quando tutte le operazioni pendenti sono terminate. Gli eventi tardivi dopo
+la chiusura del pannello possono restituire `RO_E_CLOSED`/`RPC_E_DISCONNECTED`: sono gestiti anche quando
+si completa un deferral o si scollegano gli eventi della sorgente che Windows ha già chiuso.
+L'invio finale al driver avviene in background, compresa la creazione delle drawing session, così un
+dialogo del driver ("Salva output di stampa" di Microsoft Print to PDF) non blocca il thread della finestra.
+Le risorse della sorgente Win2D vengono mantenute fino alla successiva stampa
+o alla chiusura della finestra, separatamente dalla copia PDF. Gli errori effettivi sono mostrati nella
+barra di stato; il completamento indica l'invio allo spooler, non la consegna fisica dei fogli.
+
+I test in `PrintingTests` coprono margini, proporzioni, limiti raster, intervalli sovrapposti, documenti
+vuoti, indipendenza della copia, valori compilati e campi ancora da salvare. Le verifiche del pannello richiedono inoltre una
+prova interattiva su Windows; stampanti fisiche e driver diversi possono avere comportamenti diversi.
+
+Verificato su Windows il pannello con anteprima dei valori compilati, il cambio di stampante e di
+orientamento, annullamento e riapertura. La stampa tramite Microsoft Print to PDF dell'intervallo `2,4`
+di un documento sintetico di quattro pagine produce due pagine con i contenuti corrispondenti,
+nell'ordine corretto; dopo l'invio l'app resta aperta e Stampa torna disponibile. Nessun foglio inviato
+a una stampante fisica durante questo collaudo.
+
+Il 24 ottobre 2026 la suite completa ha superato 120 test e la build Release win-x64 è stata compilata
+senza errori o avvisi. Gli errori gestiti della stampa vengono registrati, se possibile, in
+`%LocalAppData%\PDF26\logs\printing.log`; il fallimento della scrittura del log non interrompe la gestione
+dell'errore originale. La dipendenza Windows Forms del vecchio progetto Printing è stata rimossa;
+Win2D è referenziato dal progetto App.
+
+Riferimenti: [stampa nelle app Windows](https://learn.microsoft.com/en-us/windows/apps/develop/devices-sensors/print-from-your-app),
+[CanvasPrintDocument](https://microsoft.github.io/Win2D/WinUI3/html/T_Microsoft_Graphics_Canvas_Printing_CanvasPrintDocument.htm).
 
 ## Miniature: Cover Flow verticale e thread
 
@@ -931,6 +988,20 @@ committente (non incluso nel repo) e due sue copie manomesse in cartella tempora
 oggetto pagina aggiunto in coda): i tre stati hanno mostrato banner e barra di stato attesi. Non provato:
 firme con certificati senza catena, ECDSA, firme PAdES con marca temporale di documento, file molto grandi
 (la verifica copia i byte firmati in memoria: costa quanto il file).
+
+## Licenza e componenti di terze parti
+
+Il progetto è **AGPL-3.0 o successiva**: lo impone iText Core 9.8.0 (il suo `LICENSE.md` dice "AGPL versione 3 o, a tua scelta,
+successiva", oppure licenza commerciale), usato solo da `PdfFormDesigner` per creare i campi modulo. Compatibilità, verificata dai
+`.nuspec` dei pacchetti effettivamente risolti (`project.assets.json`) e dai file di licenza dentro i pacchetti: Apache-2.0 (PDFium) è
+compatibile con la v3 (non con la v2); MIT, BSD, zlib, FreeType Project License, Unicode e SIL OFL (font, dati distribuiti
+insieme) lo sono; i contratti Microsoft (Windows App SDK, Win2D) **non sono licenze libere** e restano il punto aperto
+(`THIRD-PARTY-NOTICES.md`, "Punti aperti"). Le clausole che pesano: Windows App SDK §3.b (far accettare ai destinatari termini che
+proteggano Microsoft e manlevarla) contro AGPL §10 (nessuna restrizione ulteriore); il pacchetto NuGet di Win2D rimanda a un EULA
+del 2014 e non contiene un testo di licenza, mentre il repository è MIT. Rimedi: distribuzione framework-dependent, domanda a
+Microsoft, o parere legale. Un'eventuale eccezione di collegamento (GPLv3 §7) coprirebbe solo il codice proprio, non quello di iText.
+`LICENSE` è il testo ufficiale (gnu.org); gli avvisi di PDFium sono presi dalla release `chromium/7999` di `pdfium-binaries`
+(il pacchetto NuGet non li contiene); FreeType chiede un riconoscimento esplicito, riportato in `THIRD-PARTY-NOTICES.md`.
 
 ## Nota sul nome dell'assembly
 

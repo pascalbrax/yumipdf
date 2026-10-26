@@ -8,13 +8,13 @@ using Windows.Storage.Pickers;
 using WinRT.Interop;
 using Pdf26.Services;
 using Pdf26.ViewModels;
-using Printing;
 
 namespace Pdf26.Views;
 
 public sealed partial class MainWindow : Window
 {
-    private readonly PrintService _printService = new();
+    private readonly NativePrintService _printService;
+    private bool _preparingPrint;
     private readonly PdfSource? _initialSource;
 
     /// <summary>How long after the window itself scrolls the document to a page (an animated scroll) the scroll position is not read back as "the user moved to another page".</summary>
@@ -39,6 +39,11 @@ public sealed partial class MainWindow : Window
     {
         _initialSource = initialSource;
         InitializeComponent();
+        _printService = new NativePrintService(this);
+        _printService.StateChanged += () => PrintButton.IsEnabled = !_preparingPrint && !_printService.IsBusy;
+        _printService.Failed += message => ViewModel.StatusMessage = message;
+        _printService.Completed += message => ViewModel.InfoMessage = message;
+        Closed += (_, _) => _printService.Dispose();
         Title = "YumiPDF";
         WindowIcon.Apply(this);
 
@@ -428,22 +433,30 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private void OnPrintClicked(object sender, RoutedEventArgs e)
+    private async void OnPrintClicked(object sender, RoutedEventArgs e)
     {
-        if (ViewModel.Document is null)
+        if (ViewModel.Document is null || _preparingPrint || _printService.IsBusy)
         {
             return;
         }
 
         try
         {
-            _printService.TryShowPrintDialogAndPrint(
-                WindowNative.GetWindowHandle(this), ViewModel.Document, ViewModel.DocumentTitle ?? "YumiPDF",
-                ViewModel.RenderPageForPrint);
+            _preparingPrint = true;
+            PrintButton.IsEnabled = false;
+            ViewModel.StatusMessage = null;
+            var title = ViewModel.DocumentTitle ?? "YumiPDF";
+            var snapshot = await ViewModel.CreatePrintSnapshotAsync();
+            await _printService.ShowAsync(snapshot, title);
         }
         catch (Exception ex)
         {
             ViewModel.StatusMessage = $"Errore di stampa: {ex.Message}";
+        }
+        finally
+        {
+            _preparingPrint = false;
+            PrintButton.IsEnabled = !_printService.IsBusy;
         }
     }
 

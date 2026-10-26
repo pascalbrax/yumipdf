@@ -12,7 +12,7 @@
     <StackPanel Spacing="16" MinWidth="320" MaxWidth="360">
 
         <!-- The name and version sit under the picture, centered. -->
-        <Image x:Name="AboutImage" Width="240" Height="240" HorizontalAlignment="Center" />
+        <Image x:Name="AboutImage" Width="170" Height="170" HorizontalAlignment="Center" />
         <StackPanel HorizontalAlignment="Center">
             <TextBlock Text="YumiPDF" Style="{StaticResource SubtitleTextBlockStyle}" HorizontalAlignment="Center" />
             <TextBlock Text="(Codename PDF26)" Opacity="0.7" FontSize="12" HorizontalAlignment="Center" />
@@ -23,7 +23,10 @@
                    Text="Visualizzatore, editor e compilatore di moduli PDF nativo per Windows 10 e 11." />
 
         <TextBlock TextWrapping="Wrap" Opacity="0.7" FontSize="12"
-                   Text="Componenti di terze parti: PDFium (bblanchon.PDFium.Win32, Apache-2.0), CommunityToolkit.Mvvm (MIT), System.Security.Cryptography.Pkcs (MIT), iText Core (AGPL-3.0); font Liberation (derivati e rinominati) e Noto Sans (SIL OFL 1.1) per riscrivere il testo." />
+                   Text="Componenti di terze parti: PDFium (Apache-2.0), CommunityToolkit.Mvvm e librerie .NET (MIT), iText Core (AGPL-3.0), Windows App SDK e Win2D (Microsoft), font Liberation (derivati) e Noto Sans (SIL OFL 1.1)." />
+
+        <TextBlock TextWrapping="Wrap" Opacity="0.7" FontSize="12"
+                   Text="Software libero: GNU AGPL v3 o successiva. Sorgenti: github.com/pascalbrax/yumipdf. Testi delle licenze: cartella Licenses." />
 
         <TextBlock x:Name="CopyrightText" Opacity="0.6" FontSize="12" />
 

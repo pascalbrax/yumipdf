@@ -41,7 +41,8 @@ Il pannello "Strumenti" (note, timbri, modifica del testo, campi modulo) e la fi
 - Pannello "Strumenti" con note e timbri da inserire sulle pagine: nota con testo, timbri testuali (APPROVATO, BOZZA, ... con data opzionale)
   o con un'immagine propria; si selezionano, spostano, ridimensionano (timbri) ed eliminano; "Salva con nome..."
   le scrive nel nuovo file come annotazioni PDF standard (le vedono anche gli altri lettori)
-- Stampa (dialogo nativo, intervallo pagine)
+- Stampa con anteprima nel pannello nativo di Windows (stampante, intervallo di pagine, copie, orientamento, carta; include
+  modifiche, annotazioni e moduli compilati senza doverli salvare) - vedi [docs/STAMPA.md](docs/STAMPA.md)
 - Selezione del testo per trascinamento (solo pagine con testo nativo), con copia automatica negli appunti
 - Navigazione dall'indice del documento (segnalibri) nella barra laterale, in alternativa alle miniature
 - Firme digitali: banner e indicazione nella barra di stato per i documenti firmati, con verifica che il
@@ -66,14 +67,14 @@ L'installer e gli aggiornamenti automatici sono pianificati nelle milestone succ
 ```
 26PDF.slnx
 ├── src/PdfEngine    Libreria PDFium (rendering, merge/split, annotazioni, moduli). Nessuna dipendenza UI.
-├── src/Printing     Stampa (GDI classico), progetto separato dall'app WinUI3 per motivi di build.
+├── src/Printing     Copia indipendente del PDF per la stampa, geometria e intervalli di pagine (nessuna UI).
 ├── src/App          App WinUI3 (Windows App SDK), unpackaged, installer MSI/EXE previsto.
 ├── tests/PdfEngine.Tests
 ├── docs/            Architettura e roadmap
 └── installer/       Note per la fase di packaging (non ancora implementato)
 ```
 
-Dettagli architetturali (perché PDFium, perché GDI per la stampa, l'unico punto delicato del codice nativo)
+Dettagli architetturali (perché PDFium, come funziona la stampa con anteprima, l'unico punto delicato del codice nativo)
 in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Build
@@ -104,14 +105,26 @@ dotnet run --project src/App/App.csproj -- "\\server\condivisione\file.pdf"
 dotnet run --project src/App/App.csproj -- "https://example.com/file.pdf"
 ```
 
+## Licenza
+
+YumiPDF è software libero: si distribuisce secondo i termini della **GNU Affero General Public License, versione 3 o
+(a tua scelta) successiva** - vedi [LICENSE](LICENSE). Copyright © 2026 Pascal Brax.
+
+La scelta dipende da iText Core (AGPL-3.0 o successiva), che l'app usa per creare i campi modulo: un programma che lo include
+e viene distribuito deve essere a sua volta AGPL. Chi riceve l'app (anche lo zip portable) ha diritto ai sorgenti, qui su
+GitHub, alle stesse condizioni. L'alternativa è una licenza commerciale di iText. Valutato anche PDFsharp (MIT): non può creare
+campi, i costruttori sono `internal`.
+
 ## Licenze di terze parti
 
-- PDFium (via `bblanchon.PDFium.Win32`): Apache-2.0
-- CommunityToolkit.Mvvm: MIT
-- System.Security.Cryptography.Pkcs (verifica dell'integrità delle firme digitali): MIT
-- Font incorporati per la modifica del testo, **SIL Open Font License 1.1** (i testi di licenza sono in `Licenses/` accanto
-  all'eseguibile): Liberation 2.1.5 (Sans, Serif, Mono; ridotti a latino/greco/cirillico e *rinominati* "PDF26 ...",
-  perché la OFL riserva il nome "Liberation" alle versioni non modificate) e Noto Sans (ridotto allo stesso modo)
-- iText Core 9 (creazione dei campi modulo): **AGPL-3.0**. Se l'app viene distribuita, l'AGPL impone di offrire anche i
-  sorgenti dell'app a chi la riceve, con la stessa licenza; l'alternativa è una licenza commerciale di iText.
-  Valutato anche PDFsharp (MIT): non può creare campi, i costruttori sono `internal`
+L'elenco completo, con versioni, licenze, riconoscimenti obbligatori e punti ancora aperti, è in
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md); i testi delle licenze sono in [`third-party-licenses/`](third-party-licenses/)
+e, nel pacchetto, nella cartella `Licenses/` accanto all'eseguibile. In sintesi:
+
+- Apache-2.0: PDFium (con il codice di terzi che contiene: FreeType, libpng, libjpeg-turbo, zlib, ICU, ...)
+- MIT: CommunityToolkit.Mvvm, librerie Microsoft .NET, .NET runtime
+- **SIL OFL 1.1**: font Liberation 2.1.5 (Sans, Serif, Mono; ridotti a latino/greco/cirillico e *rinominati* "PDF26 ...", perché
+  la OFL riserva il nome "Liberation" alle versioni non modificate) e Noto Sans
+- **AGPL-3.0 o successiva**: iText Core 9
+- **Contratti Microsoft** (non open source): Windows App SDK e Win2D (disegno delle pagine nel pannello di stampa). La loro
+  compatibilità con l'AGPL è il punto ancora aperto - vedi THIRD-PARTY-NOTICES.md

@@ -21,6 +21,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\PdfEngine\PdfEngine.csproj" />
+    <ProjectReference Include="..\..\src\Printing\Printing.csproj" />
   </ItemGroup>
 
 </Project>
