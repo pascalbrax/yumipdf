@@ -3,6 +3,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Windows.Graphics.Imaging;
+using PdfEngine.Viewing;
 using Windows.Storage;
 using Windows.Storage.Pickers;
 using WinRT.Interop;
@@ -27,7 +28,14 @@ public sealed partial class MainWindow : Window
     /// <summary>How long after a zoom change the scroll position is not read back as the user's.</summary>
     private const long ZoomSettleMilliseconds = 500;
 
+    /// <summary>Wait after the last scroll/resize event before telling the view model which pages are on screen (see <see cref="ScheduleViewedPagesUpdate"/>).</summary>
+    private const int ViewedPagesDebounceMilliseconds = 80;
+
+    /// <summary>How often the memory figure in the status bar is read.</summary>
+    private const int MemoryRefreshSeconds = 2;
+
     private Microsoft.UI.Dispatching.DispatcherQueueTimer? _refitTimer;
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _viewedPagesTimer;
     private long _ignoreScrollSyncUntil;
     private bool _syncingFromScroll;
     private (int Page, double Fraction)? _zoomAnchor;
@@ -44,6 +52,7 @@ public sealed partial class MainWindow : Window
         _printService.Failed += message => ViewModel.StatusMessage = message;
         _printService.Completed += message => ViewModel.InfoMessage = message;
         Closed += (_, _) => _printService.Dispose();
+        StartMemoryUsageTimer();
         Title = "YumiPDF";
         WindowIcon.Apply(this);
 
@@ -52,12 +61,14 @@ public sealed partial class MainWindow : Window
         ViewModel.PagesResized += OnPagesResized;
         PagesScrollViewer.ViewChanged += OnPagesViewChanged;
         PagesScrollViewer.SizeChanged += OnPagesViewportSizeChanged;
+        PagesItemsControl.SizeChanged += (_, _) => ScheduleViewedPagesUpdate();
         ThumbnailStrip.PageActivated += OnThumbnailPageActivated;
         ThumbnailStrip.CenterPageChanged += (_, pageIndex) => ViewModel.SetThumbnailFocus(pageIndex);
         UpdateSidebarHandleGlyph();
         // A click anywhere on the pages that is not on an annotation clears the selection. Heard even when
         // something underneath handled it (a text selection drag, a form field): those still count as "elsewhere".
         PagesScrollViewer.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler(OnPagesPointerPressed), handledEventsToo: true);
+        PagesScrollViewer.AddHandler(UIElement.PointerWheelChangedEvent, new PointerEventHandler(OnPagesPointerWheelChanged), handledEventsToo: true);
         AppWindow.Closing += OnAppWindowClosing;
 
         if (_initialSource is not null)
@@ -189,6 +200,8 @@ public sealed partial class MainWindow : Window
     /// </summary>
     private void OnPagesViewChanged(object? sender, ScrollViewerViewChangedEventArgs e)
     {
+        UpdatePageRowMinWidth();
+        ScheduleViewedPagesUpdate();
         if (Environment.TickCount64 < _ignoreScrollSyncUntil || ViewModel.Pages.Count == 0)
         {
             return;
@@ -249,6 +262,7 @@ public sealed partial class MainWindow : Window
     {
         if (_zoomAnchor is not var (page, fraction) || page >= ViewModel.Pages.Count)
         {
+            PublishViewedPages();
             return;
         }
 
@@ -265,6 +279,72 @@ public sealed partial class MainWindow : Window
         _ignoreScrollSyncUntil = Environment.TickCount64 + ZoomSettleMilliseconds;
         PagesScrollViewer.UpdateLayout();
         PagesScrollViewer.ChangeView(null, target, null, disableAnimation: true);
+
+        // The pages shown after a zoom are known from the target offset - do not wait for the scroll viewer to report it.
+        PublishViewedPages(target);
+    }
+
+    /// <summary>
+    /// Every row of the page list is at least as wide as the room the window leaves (its width less the 24 px of padding on each
+    /// side, see MainWindow.xaml), which is what centers a narrow page in the window - the vertical scroll bar appearing changes
+    /// that room without the scroll viewer changing size, hence the call from the scroll handler too.
+    /// </summary>
+    private void UpdatePageRowMinWidth()
+    {
+        var width = Math.Max(0, Math.Floor(PagesScrollViewer.ViewportWidth - 48));
+        if (Math.Abs(width - ViewModel.PageRowMinWidth) >= 1)
+        {
+            ViewModel.PageRowMinWidth = width;
+        }
+    }
+
+    /// <summary>Keeps the memory figure at the right of the status bar current: read now and then every <see cref="MemoryRefreshSeconds"/> seconds.</summary>
+    private void StartMemoryUsageTimer()
+    {
+        ViewModel.RefreshMemoryUsage();
+        var timer = DispatcherQueue.CreateTimer();
+        timer.Interval = TimeSpan.FromSeconds(MemoryRefreshSeconds);
+        timer.IsRepeating = true;
+        timer.Tick += (_, _) => ViewModel.RefreshMemoryUsage();
+        timer.Start();
+        Closed += (_, _) => timer.Stop();
+    }
+
+    /// <summary>
+    /// Tells the view model which pages the viewport shows, once scrolling or resizing has settled for a moment: it keeps
+    /// those pages (and the ones around the current page) rendered and releases the rest. Not while the window is scrolling
+    /// itself to a page (an animated jump through the pages in between): the pages passed over are not worth rendering.
+    /// </summary>
+    private void ScheduleViewedPagesUpdate()
+    {
+        if (_viewedPagesTimer is null)
+        {
+            _viewedPagesTimer = DispatcherQueue.CreateTimer();
+            _viewedPagesTimer.Interval = TimeSpan.FromMilliseconds(ViewedPagesDebounceMilliseconds);
+            _viewedPagesTimer.IsRepeating = false;
+            _viewedPagesTimer.Tick += (_, _) =>
+            {
+                if (Environment.TickCount64 < _ignoreScrollSyncUntil)
+                {
+                    _viewedPagesTimer.Start();
+                    return;
+                }
+
+                PublishViewedPages();
+            };
+        }
+
+        _viewedPagesTimer.Stop();
+        _viewedPagesTimer.Start();
+    }
+
+    private void PublishViewedPages(double? offset = null)
+    {
+        var pages = ViewModel.Pages;
+        var (first, last) = PageWindow.VisiblePages(
+            pages.Count, index => pages[index].PixelHeight, PagePadding, PageSpacing,
+            offset ?? PagesScrollViewer.VerticalOffset, PagesScrollViewer.ViewportHeight);
+        ViewModel.SetViewedPages(first, last);
     }
 
     /// <summary>The page under the middle of the viewport, worked out from the page sizes (pages are laid out top to bottom, 24 px of padding around them and 16 px between them).</summary>
@@ -463,10 +543,10 @@ public sealed partial class MainWindow : Window
     private async void OnFitWidthClicked(object sender, RoutedEventArgs e) => await FitWidthToViewportAsync();
 
     /// <summary>
-    /// Fits the page the user is actually looking at - not some other page. A document can mix
-    /// page sizes/orientations (a landscape page among portrait ones); fitting to any page but
-    /// the current one leaves that current page wrong (too small, or cropped) regardless of
-    /// which other page's dimensions were used instead. Deliberately does not react to
+    /// Fits the width the "pagine di dimensioni diverse" option asks for (<see cref="MainViewModel.FitReferenceWidth"/>): the page
+    /// the user is actually looking at - not some other page; a document can mix page sizes/orientations (a landscape page
+    /// among portrait ones), and fitting to any page but the current one leaves that one wrong (too small, or cropped) - or the
+    /// width most pages have. Deliberately does not react to
     /// <see cref="MainViewModel.CurrentPageIndex"/> changing on its own - the user confirmed
     /// the fit should stay put when browsing to a different page, not silently re-zoom under
     /// them; only the room available (<see cref="OnPagesViewportSizeChanged"/>) re-triggers it,
@@ -479,8 +559,7 @@ public sealed partial class MainWindow : Window
             return Task.CompletedTask;
         }
 
-        var currentPage = ViewModel.Pages[Math.Clamp(ViewModel.CurrentPageIndex, 0, ViewModel.Pages.Count - 1)];
-        return ViewModel.FitWidthAsync(PagesScrollViewer.ViewportWidth, currentPage.PointWidth);
+        return ViewModel.FitWidthAsync(PagesScrollViewer.ViewportWidth, ViewModel.FitReferenceWidth(ViewModel.CurrentPageIndex));
     }
 
     /// <summary>
@@ -490,6 +569,8 @@ public sealed partial class MainWindow : Window
     /// </summary>
     private void OnPagesViewportSizeChanged(object sender, SizeChangedEventArgs e)
     {
+        UpdatePageRowMinWidth();
+        ScheduleViewedPagesUpdate();
         if (!ViewModel.IsFitWidthActive || Math.Abs(e.NewSize.Width - e.PreviousSize.Width) < 0.5)
         {
             return;
@@ -529,7 +610,7 @@ public sealed partial class MainWindow : Window
 
     private async void OnSettingsClicked(object sender, RoutedEventArgs e)
     {
-        var dialog = new SettingsDialog(ViewModel.PageAreaBackground.Color, FileAssociationService.IsRegistered())
+        var dialog = new SettingsDialog(ViewModel.PageAreaBackground.Color, FileAssociationService.IsRegistered(), ViewModel.PageMode, ViewModel.WheelZoom)
         {
             XamlRoot = Content.XamlRoot,
         };
@@ -541,6 +622,17 @@ public sealed partial class MainWindow : Window
         }
 
         ViewModel.UpdateBackgroundColor(dialog.SelectedColor);
+        ViewModel.SetWheelZoom(dialog.SelectedWheelZoom);
+
+        if (dialog.SelectedMixedPagesMode != ViewModel.PageMode)
+        {
+            ViewModel.SetPageMode(dialog.SelectedMixedPagesMode);
+            if (ViewModel.IsFitWidthActive)
+            {
+                // "Adatta a larghezza" is a mode the document stays in: it means something else now.
+                await FitWidthToViewportAsync();
+            }
+        }
 
         try
         {
@@ -756,6 +848,18 @@ public sealed partial class MainWindow : Window
             ViewModel.SelectAnnotation(null);
             args.Handled = true;
         }
+    }
+
+    /// <summary>CTRL + wheel over the pages zooms (the direction is an option); without CTRL the wheel scrolls as usual.</summary>
+    private async void OnPagesPointerWheelChanged(object sender, PointerRoutedEventArgs e)
+    {
+        if (!e.KeyModifiers.HasFlag(Windows.System.VirtualKeyModifiers.Control))
+        {
+            return;
+        }
+
+        e.Handled = true;
+        await ViewModel.ZoomByWheelAsync(e.GetCurrentPoint(PagesScrollViewer).Properties.MouseWheelDelta);
     }
 
     private void OnPagesPointerPressed(object sender, PointerRoutedEventArgs e)

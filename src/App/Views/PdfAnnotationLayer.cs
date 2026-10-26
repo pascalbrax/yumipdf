@@ -142,7 +142,7 @@ public sealed class PdfAnnotationLayer : Canvas
 
     private static (double X, double Y) ToPagePoint(PdfPageViewModel page, double xPx, double yPx)
     {
-        var zoom = page.Owner.Zoom;
+        var zoom = page.Scale;
         return (xPx / zoom, page.PointHeight - yPx / zoom);
     }
 
@@ -162,7 +162,7 @@ public sealed class PdfAnnotationLayer : Canvas
             return;
         }
 
-        var zoom = page.Owner.Zoom;
+        var zoom = page.Scale;
         foreach (var annotation in page.Annotations.Concat(page.DesignFields))
         {
             var width = Math.Max(MinHitSize, annotation.Rect.Width * zoom);
@@ -435,7 +435,7 @@ public sealed class PdfAnnotationLayer : Canvas
             return pixels;
         }
 
-        var step = PageGrid.StepPt * page.Owner.Zoom;
+        var step = PageGrid.StepPt * page.Scale;
         return Math.Round(pixels / step, MidpointRounding.AwayFromZero) * step;
     }
 
@@ -497,7 +497,7 @@ public sealed class PdfAnnotationLayer : Canvas
         }
 
         var (leftPt, topPt) = ToPagePoint(page, GetLeft(box), GetTop(box));
-        var zoom = page.Owner.Zoom;
+        var zoom = page.Scale;
         var rect = new PdfRect(leftPt, topPt - box.Height / zoom, leftPt + box.Width / zoom, topPt);
         await page.Owner.MoveAnnotationAsync(annotation, rect);
     }

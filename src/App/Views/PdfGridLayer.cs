@@ -82,7 +82,7 @@ public sealed class PdfGridLayer : Canvas
             return;
         }
 
-        var step = PageGrid.StepPt * page.Owner.Zoom;
+        var step = PageGrid.StepPt * page.Scale;
         if (step < MinGridPixels || page.PixelWidth <= step || page.PixelHeight <= step)
         {
             return;

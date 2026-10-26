@@ -11,6 +11,7 @@ using Pdf26.Services;
 using PdfEngine;
 using PdfEngine.Annotations;
 using PdfEngine.Forms;
+using PdfEngine.Viewing;
 
 namespace Pdf26.ViewModels;
 
@@ -120,6 +121,46 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     public partial string? OcrStatusText { get; set; }
 
+    /// <summary>
+    /// Status bar note about the page render running in the background (after a zoom, a scroll or an open): "Rendering di 3
+    /// pagine..." while pages of the window still wait for a bitmap at their current size; null when none does.
+    /// </summary>
+    [ObservableProperty]
+    public partial string? RenderStatusText { get; set; }
+
+    /// <summary>Status bar, right side: the memory the app is using ("Memoria: 1,2 GB"), refreshed by <see cref="RefreshMemoryUsage"/>.</summary>
+    [ObservableProperty]
+    public partial string MemoryUsageText { get; set; } = string.Empty;
+
+    private readonly System.Diagnostics.Process _process = System.Diagnostics.Process.GetCurrentProcess();
+
+    /// <summary>
+    /// Reads the working set of the whole process - the native side too (PDFium's caches and the open file, the bitmaps),
+    /// which is where most of it is: the .NET heap alone would say a few tens of MB for a document that takes a gigabyte.
+    /// </summary>
+    public void RefreshMemoryUsage()
+    {
+        _process.Refresh();
+        var megabytes = _process.WorkingSet64 / (1024.0 * 1024.0);
+        MemoryUsageText = megabytes >= 1024
+            ? string.Format(System.Globalization.CultureInfo.CurrentCulture, "Memoria: {0:0.0} GB", megabytes / 1024)
+            : string.Format(System.Globalization.CultureInfo.CurrentCulture, "Memoria: {0:0} MB", megabytes);
+    }
+
+    private void UpdateRenderStatus()
+    {
+        var waiting = 0;
+        foreach (var index in CurrentPageWindow().InRenderOrder())
+        {
+            if (!Pages[index].HasCurrentBitmap)
+            {
+                waiting++;
+            }
+        }
+
+        RenderStatusText = waiting == 0 ? null : waiting == 1 ? "Rendering di 1 pagina..." : $"Rendering di {waiting} pagine...";
+    }
+
     /// <summary>Shown in the status bar in an error color - reserve for actual failures, not confirmations (see <see cref="InfoMessage"/>).</summary>
     [ObservableProperty]
     public partial string? StatusMessage { get; set; }
@@ -175,6 +216,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         IsBookmarkPanelOpen = _settings.BookmarkPanelOpen;
         AreMoreStampsExpanded = _settings.MoreStampsExpanded;
         IsSnapToGridEnabled = _settings.SnapToGrid;
+        _pageMode = _settings.MixedPagesMode;
+        WheelZoom = _settings.WheelZoom;
         _restoringSettings = false;
         RefreshRecentEntries();
     }
@@ -261,6 +304,18 @@ public partial class MainViewModel : ObservableObject, IDisposable
             SearchStatusText = null;
             NotifyFindCommands();
 
+            // A render loop of the previous document must be over before that document is disposed.
+            _backgroundWorkDocument = null;
+            _renderCts?.Cancel();
+            try
+            {
+                await _renderTask.ConfigureAwait(true);
+            }
+            catch
+            {
+                // Cancelled or failed: it has already reported what it had to.
+            }
+
             _formFiller?.Dispose();
             _formFiller = null;
             FormFields.Clear();
@@ -280,17 +335,15 @@ public partial class MainViewModel : ObservableObject, IDisposable
             PageCount = _document.PageCount;
             CurrentPageIndex = 0;
             IsFitWidthActive = false;
-            _maxZoomForDocument = ComputeMaxZoomForDocument(_document);
+            LoadPageSizes(_document);
             Zoom = Math.Min(Zoom, _maxZoomForDocument);
 
             LoadFormFields(_document);
 
-            await RenderAllPagesAsync(cancellationToken, isNewDocument: true);
-
-            // Thumbnails/text indexing only start once the main view is completely populated -
-            // see BeginThumbnails/BeginTextIndexing.
-            BeginThumbnails(document);
-            BeginTextIndexing(document);
+            // Thumbnails/text indexing only start once the main view has its first pages -
+            // see BeginThumbnails/BeginTextIndexing, called by RunRenderAsync when that render is done.
+            _backgroundWorkDocument = document;
+            await RenderPagesAsync(cancellationToken, isNewDocument: true);
             StatusMessage = null;
             RegisterRecent(source);
             return OpenOutcome.Success;
@@ -512,14 +565,51 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// </summary>
     public bool IsFitWidthActive { get; private set; }
 
+    /// <summary>Which way the mouse wheel zooms in with CTRL held; the choice is in "Opzioni".</summary>
+    public WheelZoomDirection WheelZoom { get; private set; }
+
+    public void SetWheelZoom(WheelZoomDirection direction)
+    {
+        WheelZoom = direction;
+        _settings.WheelZoom = direction;
+        SaveSettings();
+    }
+
+    /// <summary>Zoom step of one wheel notch (a delta of 120): 10 %, so ten notches roughly double the page.</summary>
+    private const double WheelZoomStep = 1.1;
+
+    /// <summary>
+    /// CTRL + mouse wheel. <paramref name="wheelDelta"/> is the wheel's own, positive for forward ("up"), 120 per notch (a
+    /// touchpad sends smaller ones, which zoom by a smaller step), so the zoom follows how far the wheel turned.
+    /// </summary>
+    public Task ZoomByWheelAsync(int wheelDelta)
+    {
+        if (wheelDelta == 0)
+        {
+            return Task.CompletedTask;
+        }
+
+        var notches = wheelDelta / 120.0 * (WheelZoom == WheelZoomDirection.UpZoomsIn ? 1 : -1);
+        return SetZoomAsync(Zoom * Math.Pow(WheelZoomStep, notches));
+    }
+
+    /// <summary>
+    /// Room kept around a fitted page, in pixels: the 24 px of padding on each side of the page list (see MainWindow.xaml) and
+    /// a little more, so a fitted page never makes the list scroll sideways by a few pixels.
+    /// </summary>
+    private const double FitMargin = 56;
+
+    /// <summary>The width, in points, that "Adatta a larghezza" fits for <paramref name="pageIndex"/>, as the page-size option says.</summary>
+    public double FitReferenceWidth(int pageIndex)
+        => pageIndex >= 0 && pageIndex < Pages.Count
+            ? PageLayout.FitReferenceWidth(_pageMode, Pages[pageIndex].PointWidth, _commonWidth)
+            : 0;
+
     /// <summary>Sets zoom so a page of <paramref name="pageWidthPoints"/> fills <paramref name="viewportWidthPixels"/> (minus a small margin).</summary>
     /// <param name="pageWidthPoints">
-    /// The width of the page the user is currently looking at - deliberately not some other
-    /// page (e.g. the document's widest), even though a mixed-size document then fits each page
-    /// differently as the user browses to it: fitting to any page but the current one leaves
-    /// the current one wrong regardless of which other page's width was used instead. The
-    /// caller (<c>MainWindow.FitWidthToViewportAsync</c>) is the one that reads
-    /// <c>MainViewModel.CurrentPageIndex</c> for it.
+    /// The width to fit, as <see cref="FitReferenceWidth"/> gives it: the page the user is looking at, or - depending on the
+    /// "pagine di dimensioni diverse" option - the width most pages have. Never the document's widest page, which would
+    /// leave the ordinary ones small.
     /// </param>
     public Task FitWidthAsync(double viewportWidthPixels, double pageWidthPoints)
     {
@@ -529,7 +619,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
 
         IsFitWidthActive = true;
-        const double margin = 32; // leaves breathing room so the page border isn't flush against the scrollbar
+        const double margin = FitMargin;
         return ApplyZoomAsync(Math.Clamp((viewportWidthPixels - margin) / pageWidthPoints, MinZoom, _maxZoomForDocument));
     }
 
@@ -542,23 +632,45 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
 
         IsFitWidthActive = false;
-        const double margin = 32;
+        const double margin = FitMargin;
         var zoomForWidth = (viewportWidthPixels - margin) / pageWidthPoints;
         var zoomForHeight = (viewportHeightPixels - margin) / pageHeightPoints;
         return ApplyZoomAsync(Math.Clamp(Math.Min(zoomForWidth, zoomForHeight), MinZoom, _maxZoomForDocument));
     }
 
-    private async Task ApplyZoomAsync(double newZoom)
+    /// <summary>
+    /// Resizes the pages right now and returns: the crisp re-render of the pages around the current one carries on in the
+    /// background (<see cref="RequestPageWindow"/>). Not waiting for it is what keeps the zoom buttons usable - an async
+    /// command is disabled until its task completes, which used to be after every page of the document had been rendered.
+    /// </summary>
+    private Task ApplyZoomAsync(double newZoom)
     {
-        if (Math.Abs(newZoom - Zoom) < 0.001 || _document is null)
+        if (Math.Abs(newZoom - Zoom) < 0.001 || _document is not { } document)
         {
-            return;
+            return Task.CompletedTask;
         }
 
         Zoom = newZoom;
         OnPropertyChanged(nameof(ZoomPercent));
         OnPropertyChanged(nameof(ZoomPercentText));
-        await RenderAllPagesAsync(CancellationToken.None, isNewDocument: false).ConfigureAwait(true);
+
+        if (Pages.Count != document.PageCount)
+        {
+            // Zoomed while the document was still opening: its pages do not exist yet, so build them (at this zoom).
+            return RenderPagesAsync(CancellationToken.None, isNewDocument: true);
+        }
+
+        // The pages take their new size now (no PDFium call: their size in points is known), each keeping the bitmap it has,
+        // stretched - a fast, pixelated "fake zoom" - until the page is rendered again at the new size.
+        PagesResizing?.Invoke();
+        foreach (var page in Pages)
+        {
+            page.Resize(newZoom);
+        }
+
+        PagesResized?.Invoke();
+        RequestPageWindow();
+        return Task.CompletedTask;
     }
 
     public PdfDocument? Document => _document;
@@ -854,32 +966,27 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
 
     /// <summary>
-    /// Two-phase render: first size every page for the current zoom (cheap - no bitmap
-    /// decode), so the scrollable area/scrollbar are correct immediately; then fill in
-    /// bitmaps progressively in the background.
+    /// Renders the pages around the one being read - the <see cref="PageWindow"/> - and nothing else. Every page of the
+    /// document always exists as a correctly-sized placeholder (so the scrollbar is right from the start and a zoom change
+    /// is just a resize), but only the ones in the window have a bitmap: the others are released
+    /// (<see cref="TrimPagesOutsideWindow"/>) and rendered again when they come back into the window.
     /// </summary>
     /// <param name="isNewDocument">
     /// <c>true</c> when called right after opening a document (nothing on screen yet, so
-    /// <see cref="Pages"/> is rebuilt from scratch with empty placeholders). <c>false</c> for
-    /// a zoom-only refresh of the document already showing: the existing
-    /// <see cref="PdfPageViewModel"/> instances are resized in place instead, so their
-    /// *current* bitmap is immediately stretched/shrunk to the new size (a fast, pixelated
-    /// "fake zoom") rather than the page going blank until the real re-render finishes.
+    /// <see cref="Pages"/> is rebuilt from scratch with empty placeholders). <c>false</c> to render
+    /// whatever the window is missing in the document already showing (a page scrolled into the window, or resized by a zoom
+    /// change and so only showing its old bitmap stretched).
     /// </param>
     /// <remarks>
-    /// This still renders (and keeps in memory) every page of the document up front - true
-    /// viewport virtualization (skip/unload far off-screen pages) is tracked in
-    /// docs/ROADMAP.md M1 as a follow-up for very large documents.
+    /// One render loop runs at a time and reads the window <em>live</em>, before each page: a scroll or a zoom
+    /// (<see cref="RequestPageWindow"/>) does not cancel and restart it, it simply changes what the loop picks next. Only
+    /// a new document (or a zoom while the document was still opening) cancels it.
     /// </remarks>
-    private Task RenderAllPagesAsync(CancellationToken cancellationToken, bool isNewDocument)
+    private Task RenderPagesAsync(CancellationToken cancellationToken, bool isNewDocument)
     {
-        // A zoom change (or a fast re-open) can be requested while the previous render is
-        // still filling in bitmaps in the background. Chain behind it - rather than letting
-        // both run at once - instead of just cancelling: PdfEngine now serializes native
-        // calls internally (PdfiumRuntime.Gate), so an overlapping call would no longer
-        // corrupt anything, but it would still (a) block the UI thread on that lock while
-        // the resize/placeholder step below waits its turn, and (b) do wasted work rendering
-        // pages for a request that is about to be superseded anyway.
+        // The previous loop is cancelled and this one chained behind it - rather than letting both run at once. PdfEngine
+        // serializes native calls internally (PdfiumRuntime.Gate), so overlapping calls would not corrupt anything, but they
+        // would block the UI thread on that lock and do wasted work for a request that is about to be superseded anyway.
         _renderCts?.Cancel();
         var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _renderCts = cts;
@@ -890,103 +997,163 @@ public partial class MainViewModel : ObservableObject, IDisposable
         return renderTask;
     }
 
+    // ---- The rendered window of pages ----
+
+    /// <summary>The pages the viewport shows (set by the view; -1 until it first reports) - they stay rendered even beyond the current page's neighbours, e.g. zoomed far out.</summary>
+    private int _viewFirst = -1;
+    private int _viewLast = -1;
+
+    /// <summary>The document whose thumbnails and text index are still to be started: they begin once its first pages are on screen.</summary>
+    private PdfDocument? _backgroundWorkDocument;
+
+    private PageWindow CurrentPageWindow() => PageWindow.Compute(Pages.Count, CurrentPageIndex, _viewFirst, _viewLast);
+
+    /// <summary>The view reports which pages the viewport shows (after a scroll, a zoom or a resize).</summary>
+    public void SetViewedPages(int first, int last)
+    {
+        _viewFirst = first;
+        _viewLast = last;
+        RequestPageWindow();
+    }
+
+    /// <summary>
+    /// The window moved (scroll, page change, zoom): release the bitmaps that left it and make sure the pages that
+    /// entered it, or were resized, get rendered. If a render loop is already running it needs nothing more: it
+    /// looks at the window again before each page.
+    /// </summary>
+    private void RequestPageWindow()
+    {
+        if (_document is not { } document || Pages.Count == 0 || Pages.Count != document.PageCount)
+        {
+            return;
+        }
+
+        TrimPagesOutsideWindow();
+        if (_renderCts is { IsCancellationRequested: false } || NextPageToRender() is null)
+        {
+            return;
+        }
+
+        _ = RenderPagesAsync(CancellationToken.None, isNewDocument: false);
+    }
+
+    /// <summary>The nearest page to the current one, inside the window, that has no bitmap at its current size.</summary>
+    private PdfPageViewModel? NextPageToRender()
+    {
+        foreach (var index in CurrentPageWindow().InRenderOrder())
+        {
+            if (!Pages[index].HasCurrentBitmap)
+            {
+                return Pages[index];
+            }
+        }
+
+        return null;
+    }
+
+    private void TrimPagesOutsideWindow()
+    {
+        var window = CurrentPageWindow();
+        for (var index = 0; index < Pages.Count; index++)
+        {
+            if (!window.Contains(index) && Pages[index].Bitmap is not null)
+            {
+                Pages[index].Bitmap = null;
+            }
+        }
+    }
+
+    /// <summary>Starts what waits for the first pages to be on screen - thumbnails and the text index - once, for the document just opened.</summary>
+    private void StartBackgroundWork(PdfDocument document)
+    {
+        if (!ReferenceEquals(document, _backgroundWorkDocument) || !ReferenceEquals(document, _document))
+        {
+            return;
+        }
+
+        _backgroundWorkDocument = null;
+        BeginThumbnails(document);
+        BeginTextIndexing(document);
+    }
+
     private async Task RunRenderAsync(Task previousRender, CancellationTokenSource cts, bool isNewDocument)
     {
-        try
-        {
-            await previousRender.ConfigureAwait(true);
-        }
-        catch
-        {
-            // The previous render already surfaced its own errors/cancellation; this await
-            // only exists to know when it is safe to touch the document again.
-        }
-
-        if (cts.IsCancellationRequested)
-        {
-            return;
-        }
-
         var document = _document;
-        var formFiller = _formFiller;
-        if (document is null)
-        {
-            Pages.Clear();
-            return;
-        }
-
-        var zoom = Zoom;
-        List<PdfPageViewModel> placeholders;
-
-        if (!isNewDocument && Pages.Count == document.PageCount)
-        {
-            // Zoom-only refresh of the document already on screen: resize every page in
-            // place right now (cheap, no PDFium call - PointWidth/Height were captured when
-            // the page was first created) so the layout - and whatever bitmap each page
-            // already has, stretched via Stretch="Fill" - updates instantly, before the
-            // background loop below replaces it with a crisp re-render.
-            placeholders = Pages.ToList();
-            PagesResizing?.Invoke();
-            foreach (var placeholder in placeholders)
-            {
-                placeholder.Resize(zoom);
-            }
-
-            PagesResized?.Invoke();
-        }
-        else
-        {
-            Pages.Clear();
-            placeholders = new List<PdfPageViewModel>(document.PageCount);
-            for (var index = 0; index < document.PageCount; index++)
-            {
-                using var page = document.GetPage(index);
-                var (widthPt, heightPt) = page.SizeInPoints;
-                var placeholder = new PdfPageViewModel(index, widthPt, heightPt, zoom, this);
-                placeholder.SetAnnotations(PdfEditableAnnotations.List(page));
-
-                // Editable/checkable fields on this page get an in-place overlay drawn on top
-                // of the page bitmap (see PdfPageViewModel.Fields) - read-only field types
-                // (combo/list/button/signature) are left to the side panel only, since there
-                // is nothing to edit in place for them yet.
-                foreach (var field in FormFields)
-                {
-                    if (field.PageIndex != index || !(field.IsTextField || field.IsCheckableField))
-                    {
-                        continue;
-                    }
-
-                    field.UpdateOverlay(zoom, heightPt);
-                    placeholder.Fields.Add(field);
-                }
-
-                placeholders.Add(placeholder);
-                Pages.Add(placeholder);
-            }
-        }
-
-        // The page count is always known by this point (whether just counted above or reused
-        // from the resize branch), so rendering itself is always a determinate progress:
-        // this both covers the initial "opening" render (OpenAsync starts out indeterminate
-        // above) and the zoom-triggered "recalculating" re-render (ApplyZoomAsync never sets
-        // IsBusy itself - this is the only progress indicator it gets).
-        IsBusy = true;
-        IsProgressIndeterminate = false;
-        ProgressPercent = 0;
-
+        var cancelled = false;
         try
         {
+            try
+            {
+                await previousRender.ConfigureAwait(true);
+            }
+            catch
+            {
+                // The previous render already surfaced its own errors/cancellation; this await
+                // only exists to know when it is safe to touch the document again.
+            }
+
+            if (cts.IsCancellationRequested)
+            {
+                cancelled = true;
+                return;
+            }
+
+            document = _document;
+            var formFiller = _formFiller;
+            if (document is null)
+            {
+                Pages.Clear();
+                return;
+            }
+
+            if (isNewDocument || Pages.Count != document.PageCount)
+            {
+                BuildPages(document);
+                _viewFirst = -1;
+                _viewLast = -1;
+            }
+
             var completed = 0;
-            foreach (var placeholder in placeholders)
+            var expected = Math.Max(1, CurrentPageWindow().InRenderOrder().Count);
+            if (isNewDocument)
+            {
+                // The page count is known by now, so the progress of opening is determinate: the pages of the first window.
+                IsBusy = true;
+                IsProgressIndeterminate = false;
+                ProgressPercent = 0;
+            }
+
+            while (true)
             {
                 cts.Token.ThrowIfCancellationRequested();
+                if (!ReferenceEquals(document, _document) || Pages.Count != document.PageCount)
+                {
+                    break;
+                }
 
+                TrimPagesOutsideWindow();
+                if (NextPageToRender() is not { } placeholder)
+                {
+                    break;
+                }
+
+                UpdateRenderStatus();
                 var pageIndex = placeholder.Index;
                 var pixelWidth = (int)Math.Round(placeholder.PixelWidth);
                 var pixelHeight = (int)Math.Round(placeholder.PixelHeight);
 
                 var bgra = await Task.Run(() => RenderPageBgra(document, formFiller, pageIndex, pixelWidth, pixelHeight), cts.Token)
                     .ConfigureAwait(true);
+                cts.Token.ThrowIfCancellationRequested();
+
+                // Zoomed, or scrolled out of the window, while this page was being rendered: that bitmap is no use
+                // (the loop picks the page again, at its new size, if it still needs one).
+                if (pixelWidth != (int)Math.Round(placeholder.PixelWidth)
+                    || pixelHeight != (int)Math.Round(placeholder.PixelHeight)
+                    || !CurrentPageWindow().Contains(pageIndex))
+                {
+                    continue;
+                }
 
                 var bitmap = new WriteableBitmap(pixelWidth, pixelHeight);
                 using (var stream = bitmap.PixelBuffer.AsStream())
@@ -996,14 +1163,18 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
                 placeholder.Bitmap = bitmap;
 
-                completed++;
-                ProgressPercent = placeholders.Count == 0 ? 100 : 100.0 * completed / placeholders.Count;
+                if (isNewDocument)
+                {
+                    completed++;
+                    ProgressPercent = Math.Min(100, 100.0 * completed / expected);
+                }
             }
         }
         catch (OperationCanceledException)
         {
-            // Superseded by a newer OpenAsync/zoom change - the placeholders/pages already
+            // Superseded by a newer OpenAsync - the placeholders/pages already
             // added belong to the previous request and get cleared at the start of the next one.
+            cancelled = true;
         }
         catch (Exception ex)
         {
@@ -1014,30 +1185,135 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
         finally
         {
-            IsBusy = false;
+            if (isNewDocument)
+            {
+                IsBusy = false;
+            }
+
+            // Nothing left running: the next scroll or zoom starts a loop of its own (see RequestPageWindow).
+            if (ReferenceEquals(_renderCts, cts))
+            {
+                _renderCts = null;
+                RenderStatusText = null;
+            }
         }
 
         PreviousPageCommand.NotifyCanExecuteChanged();
         NextPageCommand.NotifyCanExecuteChanged();
         ZoomInCommand.NotifyCanExecuteChanged();
         ZoomOutCommand.NotifyCanExecuteChanged();
+
+        if (!cancelled && document is not null)
+        {
+            StartBackgroundWork(document);
+        }
+    }
+
+    /// <summary>One placeholder per page of the document, sized for the current zoom, with the page's annotations and form-field overlays.</summary>
+    private void BuildPages(PdfDocument document)
+    {
+        var zoom = Zoom;
+        Pages.Clear();
+        for (var index = 0; index < document.PageCount; index++)
+        {
+            using var page = document.GetPage(index);
+            var (widthPt, heightPt) = page.SizeInPoints;
+            var factor = PageLayout.LayoutFactor(_pageMode, _commonWidth, widthPt);
+            var placeholder = new PdfPageViewModel(index, widthPt, heightPt, zoom, factor, this);
+            placeholder.SetAnnotations(PdfEditableAnnotations.List(page));
+
+            // Editable/checkable fields on this page get an in-place overlay drawn on top
+            // of the page bitmap (see PdfPageViewModel.Fields) - read-only field types
+            // (combo/list/button/signature) are left to the side panel only, since there
+            // is nothing to edit in place for them yet.
+            foreach (var field in FormFields)
+            {
+                if (field.PageIndex != index || !(field.IsTextField || field.IsCheckableField))
+                {
+                    continue;
+                }
+
+                field.UpdateOverlay(placeholder.Scale, heightPt);
+                placeholder.Fields.Add(field);
+            }
+
+            Pages.Add(placeholder);
+        }
     }
 
     /// <summary>
     /// Caps zoom so that no page of <paramref name="document"/> can be rendered past
     /// <see cref="SafeMaxPixelDimension"/> on either axis - see the field's remarks.
     /// </summary>
-    private static double ComputeMaxZoomForDocument(PdfDocument document)
+    private void LoadPageSizes(PdfDocument document)
     {
-        double maxPointDimension = 1;
+        _pageSizesPt.Clear();
         for (var index = 0; index < document.PageCount; index++)
         {
             using var page = document.GetPage(index);
-            var (widthPt, heightPt) = page.SizeInPoints;
-            maxPointDimension = Math.Max(maxPointDimension, Math.Max(widthPt, heightPt));
+            _pageSizesPt.Add(page.SizeInPoints);
         }
 
-        return Math.Min(MaxZoom, SafeMaxPixelDimension / maxPointDimension);
+        _commonWidth = PageLayout.CommonWidth(_pageSizesPt.Select(size => size.Width).ToList());
+        _maxZoomForDocument = MaxZoomForPageSizes();
+    }
+
+    private double MaxZoomForPageSizes()
+        => Math.Min(MaxZoom, SafeMaxPixelDimension / PageLayout.LongestSide(_pageSizesPt, _pageMode, _commonWidth));
+
+    // ---- Pages of different sizes (the "Opzioni" choice) ----
+
+    private MixedPagesMode _pageMode;
+    private readonly List<(double Width, double Height)> _pageSizesPt = new();
+    private double _commonWidth;
+
+    /// <summary>How the open document's pages of different sizes are shown (see <see cref="MixedPagesMode"/>).</summary>
+    public MixedPagesMode PageMode => _pageMode;
+
+    /// <summary>Minimum width of a row of the page list: the room the window leaves, so a page narrower than it sits in the middle of the window.</summary>
+    [ObservableProperty]
+    public partial double PageRowMinWidth { get; set; }
+
+    /// <summary>Changes the option, remembers it, and re-lays-out the document already open.</summary>
+    public void SetPageMode(MixedPagesMode mode)
+    {
+        if (mode == _pageMode)
+        {
+            return;
+        }
+
+        _pageMode = mode;
+        _settings.MixedPagesMode = mode;
+        SaveSettings();
+
+        if (_document is null || _pageSizesPt.Count == 0)
+        {
+            return;
+        }
+
+        // Every page may change size (and the largest zoom with it): same as a zoom change, without a new zoom.
+        _maxZoomForDocument = MaxZoomForPageSizes();
+        var zoom = Math.Min(Zoom, _maxZoomForDocument);
+        if (Math.Abs(zoom - Zoom) > 0.0001)
+        {
+            Zoom = zoom;
+            OnPropertyChanged(nameof(ZoomPercent));
+            OnPropertyChanged(nameof(ZoomPercentText));
+        }
+
+        if (Pages.Count != _pageSizesPt.Count)
+        {
+            return;
+        }
+
+        PagesResizing?.Invoke();
+        foreach (var page in Pages)
+        {
+            page.Resize(Zoom, PageLayout.LayoutFactor(_pageMode, _commonWidth, page.PointWidth));
+        }
+
+        PagesResized?.Invoke();
+        RequestPageWindow();
     }
 
     // ---- Bookmarks (document index) -----------------------------------------------------
@@ -1251,17 +1527,16 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public void SetThumbnailFocus(int pageIndex) => _thumbnailFocusIndex = pageIndex;
 
     /// <summary>
-    /// Starts thumbnail generation - deliberately only once the main view is completely
-    /// populated (every page has its bitmap), so thumbnails never compete with the first full
-    /// render of the document. A render that was cancelled or failed part-way leaves pages
-    /// without a bitmap, which is how this notices and stays out.
+    /// Starts thumbnail generation - deliberately only once the main view has its first pages
+    /// (<see cref="StartBackgroundWork"/>), so thumbnails never compete with the first render of
+    /// the document. They are independent of the main view's bitmaps: they have their own, and are
+    /// neither released nor rendered again when the window moves or the zoom changes.
     /// </summary>
     private void BeginThumbnails(PdfDocument document)
     {
         if (!ReferenceEquals(document, _document)
             || document.PageCount < MinPagesForThumbnails
-            || Pages.Count != document.PageCount
-            || Pages.Any(page => page.Bitmap is null))
+            || Pages.Count != document.PageCount)
         {
             return;
         }
@@ -1435,6 +1710,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     partial void OnCurrentPageIndexChanged(int value)
     {
+        RequestPageWindow();
         UpdateCurrentBookmark();
         PreviousPageCommand.NotifyCanExecuteChanged();
         NextPageCommand.NotifyCanExecuteChanged();
@@ -1601,7 +1877,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         if (_lastHighlightedPageIndex >= 0 && _lastHighlightedPageIndex < Pages.Count)
         {
-            Pages[_lastHighlightedPageIndex].SetHighlights(Array.Empty<(double, double, double, double)>(), Zoom);
+            Pages[_lastHighlightedPageIndex].SetHighlights(Array.Empty<(double, double, double, double)>());
         }
 
         _lastHighlightedPageIndex = -1;
@@ -1631,7 +1907,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         if (_lastHighlightedPageIndex >= 0 && _lastHighlightedPageIndex != pageIndex && _lastHighlightedPageIndex < Pages.Count)
         {
-            Pages[_lastHighlightedPageIndex].SetHighlights(Array.Empty<(double, double, double, double)>(), Zoom);
+            Pages[_lastHighlightedPageIndex].SetHighlights(Array.Empty<(double, double, double, double)>());
         }
 
         IReadOnlyList<(double Left, double Bottom, double Right, double Top)> rects;
@@ -1653,7 +1929,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
-        Pages[pageIndex].SetHighlights(rects, Zoom);
+        Pages[pageIndex].SetHighlights(rects);
         _lastHighlightedPageIndex = pageIndex;
     }
 
@@ -1698,7 +1974,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// (<see cref="PdfPage.HasExtractableText"/>) for every page first, then queues an OCR
     /// pass for whichever pages had none. Deliberately only starts once the whole document is
     /// already on screen (called from the same place as <see cref="BeginThumbnails"/>, right
-    /// after <see cref="RenderAllPagesAsync"/> completes), so neither pass ever competes with
+    /// after the first pages are rendered - <see cref="StartBackgroundWork"/>), so neither pass ever competes with
     /// the document's first real render for the single PDFium thread.
     /// </summary>
     private void BeginTextIndexing(PdfDocument document)

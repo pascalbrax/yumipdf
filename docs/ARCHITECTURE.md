@@ -38,7 +38,7 @@ statico `PdfiumRuntime.Gate` (`lock`/`Monitor`, rientrante sullo stesso thread) 
 nativa, cosi' che i chiamanti non debbano occuparsene.
 
 Questo non era vero nella prima versione del rendering "a due fasi" di `MainViewModel`
-(`RenderAllPagesAsync`): un cambio di zoom mentre il rendering delle pagine dall'apertura era ancora in
+(`RenderPagesAsync`, allora `RenderAllPagesAsync`): un cambio di zoom mentre il rendering delle pagine dall'apertura era ancora in
 corso avviava un **secondo** giro di rendering in parallelo al primo sullo stesso `PdfDocument`, da un
 thread diverso - due chiamate PDFium concorrenti, che corrompevano lo stato nativo e mandavano in crash
 il processo (riprodotto e confermato con un documento reale dalle pagine molto grandi, dove il rendering di
@@ -53,7 +53,7 @@ richiesta piu' recente sta per svuotare.
 `MainViewModel` (e in generale qualunque codice sotto `src/App`, a differenza di `PdfEngine`/`Printing`
 che sono librerie pure) non deve mai usare `.ConfigureAwait(false)`: i suoi metodi `async` continuano a
 toccare stato che deve restare sul thread UI - proprietà `[ObservableProperty]` che pilotano `x:Bind`, e
-`RenderAllPagesAsync`/`RunRenderAsync` il cui stesso `ConfigureAwait(true)` funziona solo se esiste ancora
+`RenderPagesAsync`/`RunRenderAsync` il cui stesso `ConfigureAwait(true)` funziona solo se esiste ancora
 un `SynchronizationContext` della UI a cui tornare. Un `ConfigureAwait(false)` in `OpenAsync` (sulla
 risoluzione della sorgente) era proprio questo bug: dopo quel punto tutto il resto del metodo - incluso
 l'`await` sul rendering e l'assegnazione finale `StatusMessage = null` - girava fuori dal thread UI, e
@@ -63,14 +63,54 @@ correttamente `ConfigureAwait(false)` al suo interno: è un servizio di libreria
 
 ## Zoom istantaneo ("fake zoom")
 
-Su un cambio di zoom, `RenderAllPagesAsync`/`RunRenderAsync` non svuota piu' `Pages` e non riparte da
-placeholder vuoti: riusa le istanze `PdfPageViewModel` gia' a schermo e ne ridimensiona subito
-`PixelWidth`/`PixelHeight` (`PdfPageViewModel.Resize`, nessuna chiamata PDFium - usa le dimensioni in punti
-gia' note). Il bitmap corrente resta quello vecchio finche' non arriva quello nuovo: `Image` con
-`Stretch="Fill"` lo scala per riempire la nuova dimensione, dando l'illusione di uno zoom istantaneo (pixelato)
-mentre il re-render vero e proprio procede in background e sostituisce il bitmap pagina per pagina senza
-scatti. Questo path si attiva solo per un refresh zoom sullo stesso documento (`isNewDocument: false`);
-l'apertura di un nuovo documento ricostruisce sempre `Pages` da zero, dato che non c'e' nulla da "fingere".
+Su un cambio di zoom `MainViewModel.ApplyZoomAsync` non svuota `Pages` e non riparte da placeholder vuoti: riusa le
+istanze `PdfPageViewModel` gia' a schermo e ne ridimensiona subito, **in modo sincrono e senza attendere il rendering**,
+`PixelWidth`/`PixelHeight` (`PdfPageViewModel.Resize`, nessuna chiamata PDFium - usa le dimensioni in punti gia' note).
+Il bitmap corrente resta quello vecchio finche' non arriva quello nuovo: `Image` con `Stretch="Fill"` lo scala per
+riempire la nuova dimensione, dando l'illusione di uno zoom istantaneo (pixelato) mentre il re-render vero e proprio
+procede in background, solo per le pagine della finestra (sotto), e sostituisce il bitmap pagina per pagina senza scatti.
+`ApplyZoomAsync` restituisce un `Task` gia' completato: un comando `[RelayCommand]` asincrono resta disattivato finche' il
+suo `Task` non finisce, e quando il `Task` era il rendering di tutto il documento il tasto Ingrandisci si bloccava dopo
+il primo clic (misurato su un PDF di 104 pagine: un solo zoom accettato, poi disattivato; ora 4 clic di fila, 18-51 ms
+l'uno). L'apertura di un nuovo documento ricostruisce sempre `Pages` da zero, dato che non c'e' nulla da "fingere"; lo
+stesso vale per uno zoom richiesto mentre le pagine non esistono ancora.
+
+**Zoom con CTRL + rotellina.** `MainWindow.OnPagesPointerWheelChanged` (registrato con `handledEventsToo` sullo `ScrollViewer` delle pagine) intercetta la rotellina con CTRL premuto, segna l'evento come gestito (la pagina non scorre) e chiama `MainViewModel.ZoomByWheelAsync`: ogni scatto (delta 120) moltiplica lo zoom per 1,1, un touchpad con delta piu' piccoli zooma di meno, e fine a fine corsa vale il limite di `SetZoomAsync`. Senza CTRL la rotellina scorre come prima. Come per i pulsanti, e' una "manual zoom": esce dalla modalita' "Adatta a larghezza". Lo zoom resta ancorato alla pagina in cima alla vista (non al puntatore). La direzione e' un'opzione (`AppSettings.WheelZoom`, `WheelZoomDirection.UpZoomsIn` predefinita: avanti ingrandisce; `UpZoomsOut` la inverte), nel dialogo Opzioni. Provato dal vivo: +120 da 100% a 110%, 121%, indietro 110%, -360 a 83%; con l'opzione invertita il contrario; la rotellina senza CTRL scorre senza cambiare lo zoom.
+
+## Finestra di pagine renderizzate
+
+Ogni pagina esiste sempre come segnaposto della dimensione giusta (barra di scorrimento corretta da subito), ma solo le
+pagine della **finestra** hanno un bitmap: la pagina corrente, le 3 precedenti e le 3 successive (quelle che esistono) piu'
+le pagine che il viewport mostra (a zoom piccolo ne mostra molte piu' di sette, e non devono essere bianche). Le altre hanno
+`Bitmap = null` (`TrimPagesOutsideWindow`) e tornano a essere renderizzate quando rientrano. Il calcolo e' in
+`PdfEngine.Viewing.PageWindow` (funzioni pure, con test): le due parti - intorno alla pagina corrente e viewport - restano
+separate, cosi' durante un salto lontano (miniature, ricerca) la pagina di arrivo e' gia' quella corrente mentre il viewport
+mostra ancora il vecchio punto, senza tenere in memoria le pagine in mezzo. L'ordine di rendering e' "la piu' vicina alla
+corrente per prima, a parita' la successiva".
+
+`MainViewModel.RunRenderAsync` e' **un solo ciclo** che legge la finestra *dal vivo* prima di ogni pagina
+(`NextPageToRender`: la prima della finestra senza un bitmap della dimensione attuale, `PdfPageViewModel.HasCurrentBitmap`).
+Uno scorrimento o uno zoom (`RequestPageWindow`) non annullano e non riavviano il ciclo: ne cambiano soltanto il prossimo
+passo, e se nessun ciclo e' in corso ne parte uno. Solo l'apertura di un nuovo documento (o lo zoom mentre si sta ancora
+aprendo) annulla il ciclo, accodando il successivo dietro di esso come prima (un solo chiamante PDFium alla volta). Un
+bitmap che arriva dopo che la pagina e' stata ridimensionata o e' uscita dalla finestra viene scartato.
+
+La vista dice al view model quali pagine sono visibili (`MainViewModel.SetViewedPages`, da `MainWindow.PublishViewedPages`
+con `PageWindow.VisiblePages`): dopo ogni scorrimento o cambio di dimensione, con 80 ms di attesa (`ScheduleViewedPagesUpdate`),
+non durante uno scorrimento animato avviato dalla finestra stessa (le pagine superate non valgono un rendering), e subito dopo
+uno zoom, dall'offset di arrivo. Anche il cambio di `CurrentPageIndex` chiede la finestra.
+
+**Miniature, indice del testo e OCR** non dipendono dai bitmap della vista (hanno i propri) e non vengono rigenerati da zoom
+o scorrimento. Prima partivano a "ogni pagina ha il suo bitmap"; ora partono quando le prime pagine sono a schermo
+(`StartBackgroundWork`, una volta per documento, anche se lo zoom ha annullato il primo giro). Competono con il rendering
+della finestra solo per l'unico thread PDFium, una pagina per volta.
+
+Misurato dal vivo su un PDF di 104 pagine (250 MB, molte immagini): apertura 5,3 s contro 11 s; memoria 1,2-1,5 GB dopo 4 zoom
+contro 1,9-2,3 GB (il file stesso e la cache di PDFium pesano); salto a meta' documento, zoom indietro fino al 26%, fine e
+inizio del documento: pagine sempre disegnate, miniature complete. Non coperto: elementi della UI di ogni pagina (restano
+tutti), tessere per zoom altissimi.
+
+**Barra di stato.** A sinistra, `RenderStatusText` ("Rendering di 3 pagine..."): quante pagine della finestra aspettano ancora un bitmap alla dimensione attuale, aggiornato prima di ogni pagina dal ciclo di rendering e azzerato quando il ciclo finisce - vale per zoom, scorrimento e apertura. A destra, `MemoryUsageText` ("Memoria: 1.2 GB"): il working set dell'intero processo (`Process.WorkingSet64`), letto ogni 2 secondi da un timer di `MainWindow`; conta anche la parte nativa (PDFium, il file aperto, i bitmap), che e' quasi tutto, mentre l'heap .NET da solo darebbe poche decine di MB.
 
 **Posizione di scorrimento attorno allo zoom.** Il `ScrollViewer` conserva l'offset verticale *in pixel*: se le pagine
 si ingrandiscono, a pagina 30 di 100 lo stesso offset cade a pagina ~24, e `OnPagesViewChanged` leggeva quella
@@ -80,6 +120,45 @@ Ora `MainViewModel` solleva `PagesResizing` (prima del `Resize`, dimensioni vecc
 ricalcola l'offset dalle nuove altezze (24 px di margine, 16 fra le pagine) e lo applica con `UpdateLayout` +
 `ChangeView` senza animazione. Durante lo spostamento la sincronizzazione scorrimento->pagina corrente e' sospesa
 (`ZoomSettleMilliseconds`). Verificato dal vivo su un PDF di 60 pagine: da pagina 30, 3 zoom avanti (125%, 156%, 195%) restano sulla 30 (prima del fix a 125% si vedeva la 24). Non provati: zoom indietro e "Adatta a larghezza/pagina" con la versione corretta.
+
+## Documenti con pagine di dimensioni diverse
+
+Un PDF con molte A4 verticali e qualche A3 orizzontale in mezzo (provato con un documento di 104 pagine: la 19 e la 21 sono
+1191x842 pt, quasi tutte le altre 595x842) aveva due difetti: all'apertura si vedeva solo un lato della prima pagina, e
+"Adatta a larghezza" non mostrava bene la pagina corrente. Causa: il pannello delle pagine era largo quanto la pagina piu'
+larga e ogni pagina era centrata *dentro quel pannello*, ma lo scorrimento orizzontale partiva da 0 e mostrava l'angolo
+sinistro del pannello (il vuoto accanto alla pagina); in piu' l'adattamento calcolava solo lo zoom, mai lo scorrimento.
+
+**Impaginazione (vale sempre).** Ogni pagina sta in una riga (`Grid` nel `DataTemplate` di `MainWindow.xaml`) larga almeno
+quanto lo spazio che la finestra lascia (`MainViewModel.PageRowMinWidth`, aggiornata da `MainWindow.UpdatePageRowMinWidth`
+a ogni cambio di dimensione o scorrimento, perche' la comparsa della barra verticale cambia lo spazio senza cambiare la
+dimensione dello `ScrollViewer`) e non piu' larga di cosi'; la riga ha `HorizontalAlignment="Left"` per non allargarsi alla
+piu' larga. Una pagina stretta e' quindi sempre al centro della finestra; solo le pagine piu' larghe della finestra
+scorrono di lato. I 24 px intorno alle pagine sono un `Margin` dello `StackPanel`: il `Padding="24"` dell'`ItemsControl`
+risultava **senza effetto** (misurato con UI Automation: la prima pagina era a filo in alto a sinistra), cosi' le costanti
+`PagePadding`/`PageSpacing` usate per i calcoli di scorrimento (zoom, pagina corrente, pagine visibili) ora corrispondono al
+vero. `FitMargin` (56 px) lascia questo bordo attorno a una pagina adattata, cosi' l'adattamento non fa scorrere di lato per
+pochi pixel.
+
+**Opzione "Documenti con pagine di dimensioni diverse"** (Opzioni; `AppSettings.MixedPagesMode`, salvata per nome;
+`PdfEngine.Viewing.MixedPagesMode` e `PageLayout`, funzioni pure con test):
+- `CurrentPage` (predefinita): scala uguale per tutte le pagine; "Adatta a larghezza" adatta la pagina che si sta leggendo.
+- `CommonWidth`: scala uguale; "Adatta a larghezza" adatta la larghezza che ha la maggior parte delle pagine
+  (`PageLayout.CommonWidth`, a pari merito la prima incontrata): le pagine piu' larghe sporgono e si scorrono di lato.
+- `SameWidth`: ogni pagina e' ridimensionata alla larghezza comune (`PdfPageViewModel.LayoutFactor`, `PageLayout.LayoutFactor`):
+  niente scorrimento laterale, ma una pagina orizzontale appare piu' piccola delle altre.
+
+In `SameWidth` i pixel per punto non sono piu' lo zoom ma `PdfPageViewModel.Scale` = zoom x `LayoutFactor`: tutto cio' che converte
+fra pixel della pagina e punti PDF (livello note e timbri, righe di "Modifica testo", griglia, evidenziazioni, selezione del
+testo, campi sulla pagina) usa `Scale`, non `Owner.Zoom`. Lo zoom massimo tiene conto delle dimensioni scalate
+(`PageLayout.LongestSide`). Cambiare opzione con un documento aperto ridimensiona le pagine come uno zoom
+(`MainViewModel.SetPageMode`, con gli eventi `PagesResizing`/`PagesResized` per restare sulla stessa pagina) e, se "Adatta a
+larghezza" era attivo, lo rifa' con il nuovo significato.
+
+Provato dal vivo sul documento di 104 pagine, nelle tre modalita': all'apertura la prima pagina e' centrata; da pagina 1 "Adatta a
+larghezza" da' 143% e riempie la finestra; su una pagina orizzontale (la 21) `CurrentPage` va al 72% e la riempie, `CommonWidth` resta
+al 143% e sporge (scorrimento laterale), `SameWidth` non ha mai scorrimento laterale. Il dialogo delle Opzioni (voce "Opzioni...")
+cambia la modalita' su documento aperto e la salva. Non provato: note, timbri e campi trascinati con il mouse in `SameWidth`.
 
 ## Ombra sotto le pagine
 
@@ -316,7 +395,7 @@ tavolo; quelle *prima* si aprono a ventaglio specchiate.
   centrale, "Invoke" = apri la pagina centrale). Serve anche ai test con UI Automation.
 
 **Generazione delle miniature** (`MainViewModel.BeginThumbnails` / `RunThumbnailLoopAsync`): parte solo quando la vista
-principale è completamente popolata (ogni pagina ha il suo bitmap) e solo per documenti con 3+ pagine; è la stessa
+principale ha le sue prime pagine (`StartBackgroundWork`; la vista tiene un bitmap solo per le pagine intorno alla corrente) e solo per documenti con 3+ pagine; è la stessa
 condizione che rende visibili pulsante, maniglia e striscia. "Thread separato" significa fuori dal thread UI: un task del
 thread pool renderizza una pagina alla volta. Non può significare un secondo thread PDFium, perché la libreria in questa
 build non è thread-safe e ogni chiamata passa comunque dall'unico worker di `PdfiumRuntime`; una pagina per volta tiene
@@ -360,7 +439,7 @@ caratteri.
 **Indicizzazione** (`MainViewModel`, regione "Text search / OCR"): dopo l'apertura di un documento, un primo
 passaggio veloce legge il testo nativo di ogni pagina (una alla volta, tramite `PdfiumRuntime`, come tutto
 il resto). Le pagine senza testo proprio finiscono in coda per l'OCR. Il passaggio OCR **parte solo a
-render principale completato** (stessa chiamata di `BeginThumbnails`), una pagina alla volta, in ordine,
+render delle prime pagine completato** (stessa chiamata di `BeginThumbnails`), una pagina alla volta, in ordine,
 per non competere con il rendering per l'unico thread PDFium.
 
 **OCR**: `Services/OcrService.cs`, sopra `Windows.Media.Ocr` - l'API di sistema di Windows, non una

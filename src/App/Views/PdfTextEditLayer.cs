@@ -93,7 +93,7 @@ public sealed class PdfTextEditLayer : Canvas
             return;
         }
 
-        var zoom = page.Owner.Zoom;
+        var zoom = page.Scale;
         foreach (var line in lines)
         {
             var width = Math.Max(MinHitSize, line.Rect.Width * zoom + 4);

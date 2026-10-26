@@ -1,4 +1,17 @@
+using System.Text.Json.Serialization;
+using PdfEngine.Viewing;
+
 namespace Pdf26.Services;
+
+/// <summary>Which way the mouse wheel turns to zoom in when it is used with CTRL.</summary>
+public enum WheelZoomDirection
+{
+    /// <summary>Wheel turned forward (away from you, "up") zooms in - what most programs do.</summary>
+    UpZoomsIn,
+
+    /// <summary>Wheel turned forward zooms out.</summary>
+    UpZoomsOut,
+}
 
 /// <summary>User-configurable app preferences, persisted as JSON by <see cref="SettingsService"/>.</summary>
 public sealed class AppSettings
@@ -17,6 +30,14 @@ public sealed class AppSettings
 
     /// <summary>Whether placing and moving things on a page snaps them to the dotted grid ("Aggancia alla griglia"). Off on a first run; afterwards it stays as the user left it.</summary>
     public bool SnapToGrid { get; set; }
+
+    /// <summary>How a document with pages of different sizes is shown ("Opzioni"). Saved by name, so the file stays readable and survives reordering the values.</summary>
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public MixedPagesMode MixedPagesMode { get; set; } = MixedPagesMode.CurrentPage;
+
+    /// <summary>Which way the wheel zooms in with CTRL held ("Opzioni"). Saved by name.</summary>
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public WheelZoomDirection WheelZoom { get; set; } = WheelZoomDirection.UpZoomsIn;
 
     /// <summary>The documents opened most recently (paths or URLs), newest first - see <c>MainViewModel.RegisterRecent</c>.</summary>
     public List<string> RecentFiles { get; set; } = new();

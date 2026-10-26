@@ -27,6 +27,25 @@
             </StackPanel>
 
             <StackPanel Spacing="4">
+                <TextBlock Text="Documenti con pagine di dimensioni diverse" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                <RadioButtons x:Name="MixedPagesOptions" SelectedIndex="0">
+                    <RadioButton Content="Adatta alla pagina corrente" />
+                    <RadioButton Content="Adatta alla larghezza più comune" />
+                    <RadioButton Content="Tutte le pagine alla stessa larghezza" />
+                </RadioButtons>
+                <TextBlock TextWrapping="Wrap" Opacity="0.7" FontSize="12"
+                           Text="Le pagine sono sempre centrate nella finestra. Con la prima scelta &quot;Adatta a larghezza&quot; riempie la finestra con la pagina che stai leggendo; con la seconda con la larghezza che ha la maggior parte delle pagine (le pagine più larghe si scorrono di lato); con la terza ogni pagina viene ridimensionata alla stessa larghezza, quindi una pagina orizzontale appare più piccola delle altre ma non si scorre mai di lato." />
+            </StackPanel>
+
+            <StackPanel Spacing="4">
+                <TextBlock Text="Zoom con CTRL + rotellina del mouse" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                <RadioButtons x:Name="WheelZoomOptions" SelectedIndex="0">
+                    <RadioButton Content="Rotellina in avanti ingrandisce, indietro riduce" />
+                    <RadioButton Content="Rotellina in avanti riduce, indietro ingrandisce" />
+                </RadioButtons>
+            </StackPanel>
+
+            <StackPanel Spacing="4">
                 <ToggleSwitch x:Name="AssociatePdfToggle" Header="Associa i file .pdf a YumiPDF"
                               OnContent="Attivo" OffContent="Non attivo" />
                 <HyperlinkButton Content="Apri le impostazioni predefinite di Windows..." Click="OnOpenDefaultAppsSettingsClicked" />

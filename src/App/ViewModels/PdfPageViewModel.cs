@@ -18,15 +18,29 @@ public partial class PdfPageViewModel : ObservableObject
 {
     private readonly MainViewModel _owner;
 
-    public PdfPageViewModel(int index, double pointWidth, double pointHeight, double zoom, MainViewModel owner)
+    public PdfPageViewModel(int index, double pointWidth, double pointHeight, double zoom, double layoutFactor, MainViewModel owner)
     {
         Index = index;
         PointWidth = pointWidth;
         PointHeight = pointHeight;
         _owner = owner;
-        PixelWidth = ToPixels(pointWidth, zoom);
-        PixelHeight = ToPixels(pointHeight, zoom);
+        LayoutFactor = layoutFactor;
+        Scale = zoom * layoutFactor;
+        PixelWidth = ToPixels(pointWidth, Scale);
+        PixelHeight = ToPixels(pointHeight, Scale);
     }
+
+    /// <summary>
+    /// The factor this page is scaled by on top of the zoom: 1, except when every page is shown at the same width
+    /// (<see cref="PdfEngine.Viewing.MixedPagesMode.SameWidth"/>).
+    /// </summary>
+    public double LayoutFactor { get; private set; }
+
+    /// <summary>
+    /// Pixels per PDF point for this page: the zoom times <see cref="LayoutFactor"/>. Everything that converts between the
+    /// page's pixels and its points (annotations, text lines, the grid, highlights, field overlays) uses this, not the zoom.
+    /// </summary>
+    public double Scale { get; private set; }
 
     public int Index { get; }
 
@@ -87,6 +101,15 @@ public partial class PdfPageViewModel : ObservableObject
     public partial WriteableBitmap? Bitmap { get; set; }
 
     /// <summary>
+    /// Whether <see cref="Bitmap"/> is a render at the size the page has now. False without a bitmap (a page outside the
+    /// rendered window, or not reached yet) and after a zoom change, while the old bitmap is still shown stretched.
+    /// </summary>
+    public bool HasCurrentBitmap
+        => Bitmap is { } bitmap
+            && bitmap.PixelWidth == (int)Math.Round(PixelWidth)
+            && bitmap.PixelHeight == (int)Math.Round(PixelHeight);
+
+    /// <summary>
     /// Editable/checkable AcroForm fields on this page (populated once, when the page is
     /// first created - see <c>MainViewModel.RunRenderAsync</c>), drawn as an in-place overlay
     /// on top of <see cref="Bitmap"/> so the user can type/click directly on the page instead
@@ -130,8 +153,7 @@ public partial class PdfPageViewModel : ObservableObject
     /// <summary>Converts a point within this page's own bitmap (pixels, top-down, as rendered) to PDF point space (points, bottom-up) at the current zoom.</summary>
     private (double X, double Y) ToPagePoint(Point pixelPoint)
     {
-        var zoom = _owner.Zoom;
-        return (pixelPoint.X / zoom, PointHeight - pixelPoint.Y / zoom);
+        return (pixelPoint.X / Scale, PointHeight - pixelPoint.Y / Scale);
     }
 
     /// <summary>Starts (or restarts) a drag-to-select at a pixel point - clears any previous selection first, then does nothing further if this page has no native text or the point does not land on a character.</summary>
@@ -256,7 +278,7 @@ public partial class PdfPageViewModel : ObservableObject
 
     private void RebuildSelection()
     {
-        var zoom = _owner.Zoom;
+        var zoom = Scale;
         Selection.Clear();
         foreach (var (left, bottom, right, top) in _selectionRectsPt)
         {
@@ -268,14 +290,15 @@ public partial class PdfPageViewModel : ObservableObject
     }
 
     /// <summary>Replaces every highlight on this page - an empty list clears them (called when the page is no longer the current search match, or the query changes/closes).</summary>
-    public void SetHighlights(IReadOnlyList<(double Left, double Bottom, double Right, double Top)> rectsPt, double zoom)
+    public void SetHighlights(IReadOnlyList<(double Left, double Bottom, double Right, double Top)> rectsPt)
     {
         _highlightRectsPt = rectsPt;
-        RebuildHighlights(zoom);
+        RebuildHighlights();
     }
 
-    private void RebuildHighlights(double zoom)
+    private void RebuildHighlights()
     {
+        var zoom = Scale;
         Highlights.Clear();
         foreach (var (left, bottom, right, top) in _highlightRectsPt)
         {
@@ -287,19 +310,22 @@ public partial class PdfPageViewModel : ObservableObject
     }
 
     /// <summary>Rescales the page's on-screen size (and every field/highlight overlay's position) to a new zoom level. Does not touch <see cref="Bitmap"/>.</summary>
-    public void Resize(double zoom)
+    public void Resize(double zoom, double? layoutFactor = null)
     {
-        PixelWidth = ToPixels(PointWidth, zoom);
-        PixelHeight = ToPixels(PointHeight, zoom);
+        // Scale first: whoever hears the new PixelWidth reads it.
+        LayoutFactor = layoutFactor ?? LayoutFactor;
+        Scale = zoom * LayoutFactor;
+        PixelWidth = ToPixels(PointWidth, Scale);
+        PixelHeight = ToPixels(PointHeight, Scale);
 
         foreach (var field in Fields)
         {
-            field.UpdateOverlay(zoom, PointHeight);
+            field.UpdateOverlay(Scale, PointHeight);
         }
 
         if (_highlightRectsPt.Count > 0)
         {
-            RebuildHighlights(zoom);
+            RebuildHighlights();
         }
 
         if (_selectionRectsPt.Count > 0)

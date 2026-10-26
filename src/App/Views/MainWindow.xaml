@@ -431,10 +431,10 @@
                     <!--
                         Every page gets a correctly-sized placeholder up front (ItemsControl over a
                         plain, non-virtualizing StackPanel) so the whole document scrolls
-                        continuously and the scrollbar is right immediately; bitmaps fill in
-                        progressively - see MainViewModel.RenderAllPagesAsync.
+                        continuously and the scrollbar is right immediately; only the pages around
+                        the current one (and those on screen) have a bitmap - see MainViewModel.RenderPagesAsync.
                     -->
-                    <ItemsControl x:Name="PagesItemsControl" ItemsSource="{x:Bind ViewModel.Pages}" Padding="24">
+                    <ItemsControl x:Name="PagesItemsControl" ItemsSource="{x:Bind ViewModel.Pages}">
                         <ItemsControl.Resources>
                             <!--
                                 One soft shadow shared by every page (Translation on the page border sets its depth).
@@ -445,12 +445,19 @@
                         </ItemsControl.Resources>
                         <ItemsControl.ItemsPanel>
                             <ItemsPanelTemplate>
-                                <StackPanel Orientation="Vertical" Spacing="16" HorizontalAlignment="Center" />
+                                <!-- The 24 px around the pages are a Margin here: the ItemsControl's own Padding was measured to have no effect (pages sat flush against the top-left of the view). -->
+                                <StackPanel Orientation="Vertical" Spacing="16" HorizontalAlignment="Left" Margin="24" />
                             </ItemsPanelTemplate>
                         </ItemsControl.ItemsPanel>
                         <ItemsControl.ItemTemplate>
                             <DataTemplate x:DataType="vm:PdfPageViewModel">
-                                <Border Background="White" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1"
+                                <!--
+                                    One row per page, at least as wide as the window and no wider than the page needs: a narrow page
+                                    sits in the middle of the window however wide another page of the document is (the panel is as
+                                    wide as the widest row, and a row does not stretch to it).
+                                -->
+                                <Grid HorizontalAlignment="Left" MinWidth="{x:Bind Owner.PageRowMinWidth, Mode=OneWay}">
+                                <Border HorizontalAlignment="Center" Background="White" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1"
                                         Shadow="{StaticResource PageShadow}" Translation="0,0,16"
                                         Width="{x:Bind PixelWidth, Mode=OneWay}" Height="{x:Bind PixelHeight, Mode=OneWay}">
                                     <Grid>
@@ -633,6 +640,7 @@
                                         </ItemsControl>
                                     </Grid>
                                 </Border>
+                                </Grid>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
@@ -654,8 +662,12 @@
 
         </SplitView>
 
-        <StackPanel Grid.Row="2" Orientation="Horizontal" Padding="12,6" Spacing="16" VerticalAlignment="Center"
-                    Background="{ThemeResource LayerFillColorDefaultBrush}">
+        <Grid Grid.Row="2" Background="{ThemeResource LayerFillColorDefaultBrush}">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+        <StackPanel Orientation="Horizontal" Padding="12,6" Spacing="16" VerticalAlignment="Center">
             <TextBlock Text="{x:Bind ViewModel.DocumentTitle, Mode=OneWay}" VerticalAlignment="Center" />
             <!--
                 "PDF/A-2B" (etc.) once the open document's own XMP metadata claims conformance,
@@ -666,6 +678,8 @@
             <TextBlock Text="{x:Bind ViewModel.PdfAStatusText, Mode=OneWay}" VerticalAlignment="Center" Opacity="0.7" />
             <!-- OCR: "OCR in corso: 3/12 pagine" while the background pass runs, "OCR eseguito su 12 pagine" afterwards; empty for a document with its own text. -->
             <TextBlock Text="{x:Bind ViewModel.OcrStatusText, Mode=OneWay}" VerticalAlignment="Center" Opacity="0.7" />
+            <!-- Page render in the background after a zoom, a scroll or an open: "Rendering di 3 pagine..." (empty when idle). -->
+            <TextBlock Text="{x:Bind ViewModel.RenderStatusText, Mode=OneWay}" VerticalAlignment="Center" Opacity="0.7" />
             <!-- Digital signatures: shown only for a signed document; the icon's color says how it stands (green intact, amber changed/unverifiable, red invalid). -->
             <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center"
                         Visibility="{x:Bind ViewModel.SignatureStatusVisibility, Mode=OneWay}">
@@ -688,6 +702,10 @@
             <TextBlock Text="{x:Bind ViewModel.StatusMessage, Mode=OneWay}" Foreground="{ThemeResource SystemFillColorCriticalBrush}" VerticalAlignment="Center" />
             <TextBlock Text="{x:Bind ViewModel.InfoMessage, Mode=OneWay}" VerticalAlignment="Center" />
         </StackPanel>
+        <!-- Memory used by the whole app (working set), refreshed every couple of seconds by MainWindow. -->
+        <TextBlock Grid.Column="1" Text="{x:Bind ViewModel.MemoryUsageText, Mode=OneWay}" Margin="16,0,12,0"
+                   VerticalAlignment="Center" Opacity="0.7" />
+        </Grid>
 
     </Grid>
 </Window>
