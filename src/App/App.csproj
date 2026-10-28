@@ -33,6 +33,14 @@
     <EnableDefaultXamlItems>false</EnableDefaultXamlItems>
   </PropertyGroup>
 
+  <!-- When this build was made (local time) - read back by the About dialog from the assembly's metadata. -->
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>BuildDate</_Parameter1>
+      <_Parameter2>$([System.DateTime]::Now.ToString("yyyy-MM-dd HH:mm"))</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
+
   <ItemGroup>
     <!-- Only the Windows App SDK components the app uses, instead of the "Microsoft.WindowsAppSDK" umbrella package: the umbrella also
          pulls in Windows AI, Windows ML (ONNX Runtime, DirectML) and Widgets, which a PDF viewer does not use but which a

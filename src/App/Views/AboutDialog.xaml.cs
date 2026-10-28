@@ -31,6 +31,13 @@ public sealed partial class AboutDialog : ContentDialog
         var shortVersion = version?.Split('+')[0];
         VersionText.Text = $"Versione {shortVersion ?? "sconosciuta"}";
 
+        // The date and time this build was made, stamped into the assembly by App.csproj ("BuildDate", ISO, local time).
+        var built = Assembly.GetExecutingAssembly().GetCustomAttributes<AssemblyMetadataAttribute>()
+            .FirstOrDefault(attribute => attribute.Key == "BuildDate")?.Value;
+        BuildDateText.Text = DateTime.TryParseExact(built, "yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var builtAt)
+            ? $"Build del {builtAt.ToString("dd/MM/yyyy 'alle' HH:mm", System.Globalization.CultureInfo.InvariantCulture)}"
+            : string.Empty;
+
         CopyrightText.Text = $"© {DateTime.Now.Year} Pascal Brax";
     }
 }

@@ -17,6 +17,7 @@
             <TextBlock Text="YumiPDF" Style="{StaticResource SubtitleTextBlockStyle}" HorizontalAlignment="Center" />
             <TextBlock Text="(Codename PDF26)" Opacity="0.7" FontSize="12" HorizontalAlignment="Center" />
             <TextBlock x:Name="VersionText" Opacity="0.7" HorizontalAlignment="Center" />
+            <TextBlock x:Name="BuildDateText" Opacity="0.7" FontSize="12" HorizontalAlignment="Center" />
         </StackPanel>
 
         <TextBlock TextWrapping="Wrap"
