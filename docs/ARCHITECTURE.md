@@ -160,6 +160,17 @@ larghezza" da' 143% e riempie la finestra; su una pagina orizzontale (la 21) `Cu
 al 143% e sporge (scorrimento laterale), `SameWidth` non ha mai scorrimento laterale. Il dialogo delle Opzioni (voce "Opzioni...")
 cambia la modalita' su documento aperto e la salva. Non provato: note, timbri e campi trascinati con il mouse in `SameWidth`.
 
+## Barra degli strumenti: il pulsante "..." non compariva
+
+La `CommandBar` sposta nel menu "..." i pulsanti che non entrano, ma lo ricalcola solo quando cambia la sua dimensione. I pulsanti
+che compaiono dopo l'apertura della finestra (quelli che richiedono un documento: Miniature, Indice, Compila modulo, Strumenti, Salva
+con nome, e Annulla/Ripeti con il pannello Strumenti aperto) restavano tagliati sul bordo destro, senza "..." per raggiungere
+Cerca/Opzioni/Informazioni, finche' non si ridimensionava la finestra. Riprodotto avviando senza documento, aprendo la lista dei file
+recenti e cliccando un file (con il documento passato da riga di comando il problema non c'era: la barra viene misurata dopo). Non
+bastano `IsDynamicOverflowEnabled` spento e riacceso, ne' `InvalidateMeasure`: `MainWindow.RefreshToolbarOverflow` stringe la barra
+di un pixel per un passaggio di layout e poi la lascia di nuovo libera (una vera variazione di dimensione), ogni volta che cambia la
+visibilita' di uno di quei pulsanti.
+
 ## Ombra sotto le pagine
 
 Ogni pagina della vista principale ha una leggera ombra (`ThemeShadow` condiviso, risorsa `PageShadow` dell'`ItemsControl`,

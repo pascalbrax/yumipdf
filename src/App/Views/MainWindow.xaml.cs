@@ -107,6 +107,14 @@ public sealed partial class MainWindow : Window
 
     private void OnViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
+        // Buttons that appear or disappear (a document opened, a panel shown) change how much of the toolbar fits.
+        if (e.PropertyName is nameof(MainViewModel.DocumentToolsVisibility) or nameof(MainViewModel.ThumbnailButtonVisibility)
+            or nameof(MainViewModel.BookmarkButtonVisibility) or nameof(MainViewModel.FormButtonVisibility)
+            or nameof(MainViewModel.IsToolsPaneOpen))
+        {
+            RefreshToolbarOverflow();
+        }
+
         // The Precedente/Successiva buttons just move CurrentPageIndex; scrolling the
         // already-continuous page list into position happens here.
         if (e.PropertyName == nameof(MainViewModel.CurrentPageIndex))
@@ -297,6 +305,29 @@ public sealed partial class MainWindow : Window
             ViewModel.PageRowMinWidth = width;
         }
     }
+
+    /// <summary>
+    /// The toolbar moves the buttons that do not fit into the "..." menu, but it only works that out when its own size changes:
+    /// buttons shown after the window opened (the ones that need a document) were left clipped at the right edge, with no "..."
+    /// to reach them, until the window was resized. Narrowing the bar by one pixel for one layout pass, then letting it fill the
+    /// window again, is the same size change the user's resizing makes - the only thing that was found to make it measure again
+    /// (switching <c>IsDynamicOverflowEnabled</c> off and on, or invalidating its measure, did not).
+    /// </summary>
+    private void RefreshToolbarOverflow()
+        => DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        {
+            MainCommandBar.UpdateLayout();
+            var width = MainCommandBar.ActualWidth;
+            if (width < 2)
+            {
+                return;
+            }
+
+            MainCommandBar.Width = width - 1;
+            MainCommandBar.UpdateLayout();
+            MainCommandBar.ClearValue(FrameworkElement.WidthProperty);
+            MainCommandBar.UpdateLayout();
+        });
 
     /// <summary>Keeps the memory figure at the right of the status bar current: read now and then every <see cref="MemoryRefreshSeconds"/> seconds.</summary>
     private void StartMemoryUsageTimer()

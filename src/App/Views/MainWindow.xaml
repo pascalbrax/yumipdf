@@ -23,7 +23,7 @@
             <KeyboardAccelerator Key="Z" Modifiers="Control,Shift" Invoked="OnRedoInvoked" />
         </Grid.KeyboardAccelerators>
 
-        <CommandBar Grid.Row="0" DefaultLabelPosition="Right">
+        <CommandBar x:Name="MainCommandBar" Grid.Row="0" DefaultLabelPosition="Right">
             <AppBarButton Icon="OpenFile" Label="Apri..." Click="OnOpenClicked" />
             <!-- Recent documents: a sidebar panel (like Miniature, Indice, Strumenti, Compila modulo and Cerca, it excludes the others). -->
             <AppBarToggleButton Icon="Clock" Label="Recenti" IsChecked="{x:Bind ViewModel.IsRecentPanelOpen, Mode=TwoWay}" />
