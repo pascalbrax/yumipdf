@@ -50,6 +50,12 @@
 - [ ] Altri tipi di campo (pulsanti di scelta, caselle combinate, elenchi) e proprietà avanzate dei campi di testo (valore predefinito, allineamento, bordo e sfondo)
 - [ ] Fixture di test AcroForm per `PdfEngine.Tests`: c'è `Fixtures/form-choices.pdf` (combo e liste, generata a mano); mancano ancora campi di testo, checkbox e radio (oggi verificati a mano contro documenti reali non inclusi nel repo)
 
+## Organizzazione delle pagine
+- [x] "Organizza pagine": finestra con le miniature di tutte le pagine, riordino trascinando con il mouse (animato), cestino dove trascinare le pagine da eliminare, selezione multipla, Canc, annulla/ripeti/ripristina; il risultato si salva come **nuovo PDF** (predefinito; si puo' aprire subito) - vedi docs/ARCHITECTURE.md "Organizza pagine". Operazioni sul documento in posizione (`PdfPageOrganizer`: `FPDF_MovePages` + `FPDFPage_Delete`), cosi' indice, campi e metadati restano
+- [ ] Altre operazioni sulle pagine nella stessa finestra: ruotare, estrarre in un nuovo file, inserire pagine da un altro PDF, duplicare
+- [ ] Applicare il risultato al documento aperto (oggi solo "salva come nuovo PDF"): servirebbe rimappare tutto cio' che e' indicizzato per pagina (annotazioni, annulla, indice del testo, OCR, campi, miniature, indice)
+- [ ] Riordino con la tastiera nella griglia (oggi solo trascinamento)
+
 ## Allineamento
 - [x] "Aggancia alla griglia": griglia di punti (10 pt, dall'angolo in alto a sinistra) sulle pagine e aggancio di campi modulo, note e timbri in inserimento, spostamento e ridimensionamento; stato ricordato - vedi docs/ARCHITECTURE.md "Griglia di allineamento"
 - [ ] Passo della griglia regolabile; guide di allineamento ai bordi degli altri campi (oggi solo la griglia)

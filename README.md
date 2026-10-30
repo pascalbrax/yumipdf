@@ -24,9 +24,12 @@ Il pannello "Strumenti" (note, timbri, modifica del testo, campi modulo) e la fi
   dimensionati subito e bitmap popolati progressivamente
 - Zoom (+/-, percentuale) e adatta a larghezza/pagina
 - Apertura di documenti protetti da password, con richiesta e nuovo tentativo in caso di errore
-- Sfondo dell'area pagina personalizzabile (menu Opzioni)
+- Sfondo dell'area pagina a scelta fra 16 colori pastello (menu Opzioni)
 - Associazione col tipo file `.pdf` attivabile/disattivabile dal menu Opzioni (mai automatica)
 - Unione, suddivisione e riordino di PDF
+- "Organizza" (barra degli strumenti): una finestra con le miniature di tutte le pagine, da trascinare con il mouse per
+  riordinarle (le altre scorrono per fare posto) e da lasciare sul cestino per eliminarle; annulla/ripeti, e il risultato si
+  salva in un **nuovo PDF** (il file aperto e l'originale non vengono toccati)
 - Compilazione di moduli AcroForm dal pannello "Compila modulo": campi di testo e checkbox/radio,
   con anteprima live del valore appena scritto sulla pagina; salvataggio con nome, con appiattimento
   opzionale (rende i valori permanenti, non più modificabili in quella sessione)

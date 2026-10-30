@@ -106,6 +106,10 @@ internal static class PdfiumNative
     [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
     public static extern void FPDFPage_Delete(IntPtr document, int pageIndex);
 
+    /// <summary>Moves the pages at <paramref name="pageIndices"/> (in that order) so they start at <paramref name="destPageIndex"/> - fpdf_ppo.h.</summary>
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern int FPDF_MovePages(IntPtr document, int[] pageIndices, uint pageIndicesLength, int destPageIndex);
+
     // ---- fpdf_annot.h : markup annotations (highlight / note / ink / stamp) ------------
 
     public enum FPDF_ANNOTATION_SUBTYPE

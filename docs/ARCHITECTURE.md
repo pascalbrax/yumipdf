@@ -171,6 +171,55 @@ bastano `IsDynamicOverflowEnabled` spento e riacceso, ne' `InvalidateMeasure`: `
 di un pixel per un passaggio di layout e poi la lascia di nuovo libera (una vera variazione di dimensione), ogni volta che cambia la
 visibilita' di uno di quei pulsanti.
 
+## Organizza pagine
+
+**Cosa fa.** Il pulsante "Organizza" (barra degli strumenti, abilitato da 2 pagine in su) apre `OrganizePagesView` sopra tutta la
+finestra: una griglia (`GridView`) con le miniature di tutte le pagine. Si trascinano per riordinarle, si lasciano sul cestino (icona
+in basso a destra, che si ingrandisce e diventa rossa quando una pagina ci passa sopra) o si selezionano (CTRL/MAIUSC) e si
+eliminano con Canc o con "Elimina selezionate". "Annulla", "Ripeti" e "Ripristina" lavorano dentro la finestra; CTRL+Z/CTRL+Y e Esc
+vengono deviati verso di essa mentre e' aperta (`MainWindow.OnUndoInvoked`/`OnRedoInvoked`/`OnEscapeInvoked`). "Salva come nuovo
+PDF..." (il pulsante predefinito) scrive un **nuovo** file; la casella "Apri il nuovo file dopo averlo salvato" e' attiva di
+default. Il documento aperto e il file originale non vengono mai modificati.
+
+**Lavora su una copia.** `MainViewModel.GetCurrentFileBytesAsync` produce il documento esattamente come lo scriverebbe "Salva con
+nome..." (annotazioni e valori dei campi compresi, e i campi modulo creati ma non ancora scritti, via `PdfFormDesigner`);
+`OrganizePagesViewModel.CreateAsync` ne apre una copia (`PdfDocument.OpenFromBytes`: il buffer non viene copiato, resta quello).
+Niente di tutto cio' tocca l'indice di pagina dello stato dell'app (annotazioni, annulla, indice del testo, OCR, campi, miniature,
+indice): e' questo che rende l'approccio economico rispetto al riordino "dal vivo". Il file salvato contiene gia' tutte le modifiche del
+documento aperto, quindi riaprirlo non perde nulla e la domanda "modifiche non salvate" viene saltata (`HasUnsavedChanges = false`
+prima di `OpenSourceAsync`). Un documento protetto da password si apre con la stessa (`MainViewModel.DocumentPassword`) e viene
+salvato con la stessa protezione. Un documento **firmato** si puo' organizzare dopo un avviso: il nuovo file non avra' una firma
+valida.
+
+**Motore** (`PdfEngine.Organize.PdfPageOrganizer`). A differenza di `PdfMergeSplitService.Reorder`, che costruisce un documento
+nuovo importando le pagine (e perde indice, campi modulo e informazioni del documento), lavora **sul posto**: `FPDFPage_Delete`
+per le pagine non elencate (dall'ultima alla prima) e una sola `FPDF_MovePages` verso l'inizio per l'ordine. L'indice (bookmark)
+segue le pagine che puntano; una voce che puntava a una pagina eliminata resta senza destinazione. Rifiuta l'elenco vuoto, un
+indice fuori intervallo o ripetuto. 10 test (`PdfPageOrganizerTests`, su `bookmarks.pdf`: ordine, eliminazione, entrambe,
+identita', indice dopo salvataggio e riapertura, input non modificato, errori).
+
+**Interfaccia e animazione.** Il riordino e' quello nativo del `GridView` (`CanDragItems`, `CanReorderItems`, `AllowDrop` sulla
+`ObservableCollection` di `OrganizePageItem`): mentre si trascina le altre miniature scorrono per fare posto e al rilascio si
+assestano; `ItemContainerTransitions` (`AddDeleteThemeTransition`, `ReorderThemeTransition`, `RepositionThemeTransition`) animano
+anche l'eliminazione, annulla e ripristino. Annulla/ripeti ripristinano un elenco di indici di partenza con il minimo di
+spostamenti (`OrganizePagesViewModel.ApplyOrder`: rimuove, reinserisce e sposta gli stessi elementi, non ricostruisce la lista),
+cosi' anche quelli si animano. Un trascinamento e' un solo passo di cronologia (`Commit` in `DragItemsCompleted`). Il cestino e'
+un `Border` con `AllowDrop`: le pagine in corso di trascinamento sono tenute in `_dragged` (il `DragEventArgs` di un altro
+bersaglio non le espone) e `Drop` le toglie. L'ultima pagina non si puo' eliminare.
+
+**Miniature.** Se la finestra principale ha gia' le sue (`PdfThumbnailSet`) vengono riusate subito; le altre sono renderizzate in
+background da `OrganizePagesViewModel.LoadThumbnailsAsync`, una per volta, **prima quelle sullo schermo**
+(`ContainerContentChanging` -> `SetVisible`). Il documento di prova da 104 pagine (250 MB) apre la finestra in circa 2 s con tutte
+le miniature, e la memoria sale di circa 0,5 GB (la copia del file e il suo albero in PDFium). All'uscita il rendering viene
+fermato e la copia chiusa (`CloseAsync`).
+
+**Provato dal vivo** (UI Automation e mouse reali): la finestra si apre; trascinare la pagina 1 sul posto della 4 la porta in
+terza posizione e le altre scorrono (fotogrammi a meta' trascinamento e subito dopo il rilascio); trascinare una pagina sul
+cestino la elimina (cestino rosso mentre e' sopra); Canc su una pagina selezionata; annulla, ripeti, ripristina; CTRL+Z agisce sulle
+pagine e non sul documento sotto; "Chiudi" senza modifiche chiude, con modifiche chiede conferma, Esc fa lo stesso; salvataggio
+nel selettore di file: il nuovo PDF ha le pagine giuste (verificato leggendo il testo di ogni pagina), si apre da solo e la barra di
+stato lo dice. Non provato: documento protetto da password, documento firmato, riordino di piu' pagine selezionate insieme.
+
 ## Ombra sotto le pagine
 
 Ogni pagina della vista principale ha una leggera ombra (`ThemeShadow` condiviso, risorsa `PageShadow` dell'`ItemsControl`,

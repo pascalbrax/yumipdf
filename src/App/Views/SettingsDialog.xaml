@@ -4,6 +4,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:svc="using:Pdf26.Services"
     mc:Ignorable="d"
     Title="Opzioni"
     PrimaryButtonText="Salva"
@@ -13,7 +14,7 @@
     <!--
         The dialog's own available height is capped by the main window's current size, and a
         ContentDialog does not scroll its content by default - on a modest (non-maximized)
-        window the ColorPicker alone is tall enough to push later options (the association
+        window a tall option (the colour picker this dialog used to have) pushes later options (the association
         toggle) off the bottom, invisibly clipped, until the window is enlarged. Wrapping in a
         ScrollViewer with a MaxHeight fixes that regardless of window size, and keeps working
         as more options are added later instead of silently clipping them again.
@@ -21,9 +22,25 @@
     <ScrollViewer MaxHeight="480" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
         <StackPanel Spacing="20" MinWidth="320">
 
-            <StackPanel Spacing="12">
+            <StackPanel Spacing="8">
                 <TextBlock Text="Colore sfondo area pagina" Style="{StaticResource BodyStrongTextBlockStyle}" />
-                <ColorPicker x:Name="BackgroundColorPicker" IsAlphaEnabled="False" ColorSpectrumShape="Ring" />
+                <!-- 16 ready-made pastel colors (PageBackgroundPresets), four to a row; the one in use is selected. -->
+                <GridView x:Name="BackgroundColors" SelectionMode="Single" IsItemClickEnabled="False" Padding="0"
+                          AutomationProperties.Name="Colore sfondo area pagina">
+                    <GridView.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <ItemsWrapGrid Orientation="Horizontal" MaximumRowsOrColumns="4" />
+                        </ItemsPanelTemplate>
+                    </GridView.ItemsPanel>
+                    <GridView.ItemTemplate>
+                        <DataTemplate x:DataType="svc:PageBackgroundPreset">
+                            <Border Width="56" Height="40" CornerRadius="8" Background="{x:Bind Brush}"
+                                    BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}" BorderThickness="1"
+                                    ToolTipService.ToolTip="{x:Bind Name}" AutomationProperties.Name="{x:Bind Name}" />
+                        </DataTemplate>
+                    </GridView.ItemTemplate>
+                </GridView>
+                <TextBlock x:Name="BackgroundColorName" Opacity="0.7" FontSize="12" />
             </StackPanel>
 
             <StackPanel Spacing="4">

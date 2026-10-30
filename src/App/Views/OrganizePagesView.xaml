@@ -1,0 +1,125 @@
+<UserControl
+    x:Class="Pdf26.Views.OrganizePagesView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:vm="using:Pdf26.ViewModels"
+    HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch">
+
+    <!--
+        "Organizza pagine": covers the whole window (MainWindow puts it over everything) while the user rearranges the pages of a copy
+        of the document. The page thumbnails are a GridView whose own drag and drop reorders them - the other items slide aside as
+        a page is dragged, and settle into place when it is dropped (the item container transitions below). Dropping pages on the
+        trash takes them out of the list. Nothing is written until "Salva come nuovo PDF...".
+    -->
+    <Grid Background="{ThemeResource SolidBackgroundFillColorBaseBrush}" RowDefinitions="Auto,*,Auto">
+
+        <Grid Grid.Row="0" Padding="24,16,24,8" ColumnDefinitions="*,Auto">
+            <StackPanel>
+                <TextBlock Text="Organizza pagine" Style="{StaticResource TitleTextBlockStyle}" />
+                <TextBlock Text="{x:Bind ViewModel.Summary, Mode=OneWay}" Opacity="0.7" />
+            </StackPanel>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                <Button Click="OnUndoClicked" IsEnabled="{x:Bind ViewModel.CanUndo, Mode=OneWay}" AutomationProperties.Name="Annulla">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <FontIcon Glyph="&#xE7A7;" FontSize="14" />
+                        <TextBlock Text="Annulla" />
+                    </StackPanel>
+                </Button>
+                <Button Click="OnRedoClicked" IsEnabled="{x:Bind ViewModel.CanRedo, Mode=OneWay}" AutomationProperties.Name="Ripeti">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <FontIcon Glyph="&#xE7A6;" FontSize="14" />
+                        <TextBlock Text="Ripeti" />
+                    </StackPanel>
+                </Button>
+                <Button Click="OnResetClicked" IsEnabled="{x:Bind ViewModel.HasChanges, Mode=OneWay}"
+                        ToolTipService.ToolTip="Torna all'ordine del documento, con tutte le pagine" AutomationProperties.Name="Ripristina">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <FontIcon Glyph="&#xE777;" FontSize="14" />
+                        <TextBlock Text="Ripristina" />
+                    </StackPanel>
+                </Button>
+                <Button x:Name="DeleteSelectedButton" Click="OnDeleteSelectedClicked" IsEnabled="False" AutomationProperties.Name="Elimina selezionate"
+                        ToolTipService.ToolTip="Elimina le pagine selezionate (Canc)">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <FontIcon Glyph="&#xE74D;" FontSize="14" />
+                        <TextBlock Text="Elimina selezionate" />
+                    </StackPanel>
+                </Button>
+            </StackPanel>
+        </Grid>
+
+        <Grid Grid.Row="1">
+            <GridView x:Name="PagesGrid" ItemsSource="{x:Bind ViewModel.Pages, Mode=OneWay}"
+                      SelectionMode="Extended" CanDragItems="True" CanReorderItems="True" AllowDrop="True" IsItemClickEnabled="False"
+                      Padding="24,8,24,150"
+                      DragItemsStarting="OnDragItemsStarting" DragItemsCompleted="OnDragItemsCompleted"
+                      ContainerContentChanging="OnContainerContentChanging" SelectionChanged="OnSelectionChanged" KeyDown="OnGridKeyDown">
+
+                <!-- The animation: a page that is added, removed or moved slides to its place instead of jumping, and the others make room. -->
+                <GridView.ItemContainerTransitions>
+                    <TransitionCollection>
+                        <AddDeleteThemeTransition />
+                        <ReorderThemeTransition />
+                        <RepositionThemeTransition />
+                    </TransitionCollection>
+                </GridView.ItemContainerTransitions>
+
+                <GridView.ItemTemplate>
+                    <DataTemplate x:DataType="vm:OrganizePageItem">
+                        <StackPanel Width="156" Spacing="6" Padding="4">
+                            <Grid Width="148" Height="196">
+                                <Border Width="{x:Bind BoxWidth}" Height="{x:Bind BoxHeight}" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                        Background="White" BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}" BorderThickness="1">
+                                    <Grid>
+                                        <Image Source="{x:Bind Thumbnail, Mode=OneWay}" Stretch="Fill" />
+                                        <ProgressRing Width="20" Height="20" IsActive="{x:Bind HasNoThumbnail, Mode=OneWay}"
+                                                      Visibility="{x:Bind HasNoThumbnail, Mode=OneWay}" Foreground="Gray" />
+                                    </Grid>
+                                </Border>
+                            </Grid>
+                            <TextBlock Text="{x:Bind Caption, Mode=OneWay}" HorizontalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                        </StackPanel>
+                    </DataTemplate>
+                </GridView.ItemTemplate>
+            </GridView>
+
+            <!-- The trash: drop pages here to remove them from the new document. It grows and turns red while a page is over it. -->
+            <Border x:Name="TrashZone" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,40,28" Width="132" Height="116" CornerRadius="18"
+                    AllowDrop="True" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}" BorderThickness="1"
+                    DragEnter="OnTrashDragOver" DragOver="OnTrashDragOver" DragLeave="OnTrashDragLeave" Drop="OnTrashDrop"
+                    AutomationProperties.Name="Cestino: trascina qui le pagine da eliminare">
+                <Border.ScaleTransition>
+                    <Vector3Transition />
+                </Border.ScaleTransition>
+                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="6">
+                    <FontIcon x:Name="TrashIcon" Glyph="&#xE74D;" FontSize="40" HorizontalAlignment="Center" />
+                    <TextBlock x:Name="TrashLabel" Text="Trascina qui per eliminare" TextWrapping="Wrap" TextAlignment="Center" FontSize="12" MaxWidth="110" />
+                </StackPanel>
+            </Border>
+        </Grid>
+
+        <Grid Grid.Row="2" Padding="24,12" ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="16"
+              Background="{ThemeResource LayerFillColorDefaultBrush}">
+            <TextBlock VerticalAlignment="Center" TextWrapping="Wrap" Opacity="0.7" FontSize="12"
+                       Text="Trascina le miniature per riordinarle e sul cestino per eliminarle. CTRL o MAIUSC per selezionarne più di una. Il documento aperto e il file originale non vengono modificati." />
+            <CheckBox x:Name="OpenAfterSaveCheck" Grid.Column="1" IsChecked="True" Content="Apri il nuovo file dopo averlo salvato" VerticalAlignment="Center" />
+            <Button Grid.Column="2" Content="Chiudi" Click="OnCloseClicked" />
+            <Button Grid.Column="3" Style="{StaticResource AccentButtonStyle}" Click="OnSaveClicked"
+                    IsEnabled="{x:Bind ViewModel.HasChanges, Mode=OneWay}" AutomationProperties.Name="Salva come nuovo PDF">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <FontIcon Glyph="&#xE74E;" FontSize="14" />
+                    <TextBlock Text="Salva come nuovo PDF..." />
+                </StackPanel>
+            </Button>
+        </Grid>
+
+        <!-- Shown while the new file is being written. -->
+        <Grid x:Name="SavingPanel" Grid.RowSpan="3" Visibility="Collapsed" Background="#99000000">
+            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="12">
+                <ProgressRing Width="48" Height="48" IsActive="True" Foreground="White" />
+                <TextBlock Text="Salvataggio in corso..." Foreground="White" HorizontalAlignment="Center" />
+            </StackPanel>
+        </Grid>
+    </Grid>
+</UserControl>

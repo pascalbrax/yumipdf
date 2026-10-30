@@ -63,6 +63,11 @@
                           Visibility="{x:Bind ViewModel.IsToolsPaneOpen, Mode=OneWay}" />
             <AppBarButton Icon="Save" Label="Salva con nome..." Click="OnSaveAsClicked"
                           Visibility="{x:Bind ViewModel.DocumentToolsVisibility, Mode=OneWay}" />
+            <!-- Reorder and remove pages in a window of their own (OrganizePagesView); the result goes to a new file. -->
+            <AppBarButton Icon="ViewAll" Label="Organizza" Click="OnOrganizePagesClicked"
+                          ToolTipService.ToolTip="Riordina ed elimina le pagine"
+                          IsEnabled="{x:Bind ViewModel.CanOrganizePages, Mode=OneWay}"
+                          Visibility="{x:Bind ViewModel.DocumentToolsVisibility, Mode=OneWay}" />
             <AppBarSeparator />
             <!-- Ctrl+F works from anywhere in the window - a KeyboardAccelerator bubbles up regardless of which control currently has focus. -->
             <AppBarToggleButton x:Name="SearchToggle" Icon="Find" Label="Cerca" IsChecked="{x:Bind ViewModel.IsSearchOpen, Mode=TwoWay}">
@@ -706,6 +711,9 @@
         <TextBlock Grid.Column="1" Text="{x:Bind ViewModel.MemoryUsageText, Mode=OneWay}" Margin="16,0,12,0"
                    VerticalAlignment="Center" Opacity="0.7" />
         </Grid>
+
+        <!-- "Organizza pagine": on top of everything (the last child) while it is open - see MainWindow.OnOrganizePagesClicked. -->
+        <local:OrganizePagesView x:Name="OrganizeView" Grid.RowSpan="3" Visibility="Collapsed" />
 
     </Grid>
 </Window>

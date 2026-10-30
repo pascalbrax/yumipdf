@@ -323,6 +323,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
             _document?.Dispose();
             _document = document;
+            DocumentPassword = password;
             ResetAnnotationState();
 
             Bookmarks = LoadBookmarks(document);
@@ -1706,6 +1707,42 @@ public partial class MainViewModel : ObservableObject, IDisposable
         return aspectRatio >= 1
             ? (Math.Max(1, (int)Math.Round(ThumbnailLongSidePixels / aspectRatio)), ThumbnailLongSidePixels)
             : (ThumbnailLongSidePixels, Math.Max(1, (int)Math.Round(ThumbnailLongSidePixels * aspectRatio)));
+    }
+
+    /// <summary>The password the open document was unlocked with, if it has one - the "Organizza pagine" copy needs it to open the same bytes.</summary>
+    public string? DocumentPassword { get; private set; }
+
+    /// <summary>"Organizza pagine" needs at least two pages: with one there is nothing to reorder, and the last page cannot be removed.</summary>
+    public bool CanOrganizePages => _document is not null && PageCount >= 2;
+
+    partial void OnPageCountChanged(int value) => OnPropertyChanged(nameof(CanOrganizePages));
+
+    /// <summary>
+    /// The open document exactly as "Salva con nome..." would write it now - annotations, filled fields and form fields placed but
+    /// not yet saved included - as the bytes of a PDF file. Null (with the reason in the status bar) if that fails.
+    /// </summary>
+    public async Task<byte[]?> GetCurrentFileBytesAsync()
+    {
+        var document = _document;
+        if (document is null)
+        {
+            return null;
+        }
+
+        var changes = _designFields.Select(f => (PdfFormChange)new AddFieldChange(f.PageIndex, f.ToSpec())).ToList();
+        try
+        {
+            return await Task.Run(() =>
+            {
+                var bytes = document.SaveToBytes();
+                return changes.Count > 0 ? PdfFormDesigner.Apply(bytes, changes) : bytes;
+            }).ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Impossibile preparare il documento: {ex.Message}";
+            return null;
+        }
     }
 
     partial void OnCurrentPageIndexChanged(int value)

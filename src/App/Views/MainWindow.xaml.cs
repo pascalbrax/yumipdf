@@ -68,6 +68,8 @@ public sealed partial class MainWindow : Window
         // A click anywhere on the pages that is not on an annotation clears the selection. Heard even when
         // something underneath handled it (a text selection drag, a form field): those still count as "elsewhere".
         PagesScrollViewer.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler(OnPagesPointerPressed), handledEventsToo: true);
+        OrganizeView.CloseRequested += OnOrganizeCloseRequested;
+        OrganizeView.SaveRequested += OnOrganizeSaveRequested;
         PagesScrollViewer.AddHandler(UIElement.PointerWheelChangedEvent, new PointerEventHandler(OnPagesPointerWheelChanged), handledEventsToo: true);
         AppWindow.Closing += OnAppWindowClosing;
 
@@ -775,6 +777,145 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    // ---- organize pages ----------------------------------------------------------------
+
+    /// <summary>
+    /// "Organizza": opens the page-organizing window on a copy of the document as it is now. A digitally signed document is
+    /// allowed (the result is a new file) after a warning: rearranging or dropping pages breaks the signature of that copy.
+    /// </summary>
+    private async void OnOrganizePagesClicked(object sender, RoutedEventArgs e)
+    {
+        if (ViewModel.Document is null || ViewModel.PageCount < 2 || OrganizeView.IsOpen)
+        {
+            return;
+        }
+
+        if (ViewModel.SignatureState is not null)
+        {
+            var warning = new ContentDialog
+            {
+                XamlRoot = Content.XamlRoot,
+                Title = "Documento firmato digitalmente",
+                Content = "Riordinare o eliminare pagine modifica il documento: il nuovo file che salverai non avrà una firma valida. Il file originale non viene toccato.",
+                PrimaryButtonText = "Continua",
+                CloseButtonText = "Annulla",
+                DefaultButton = ContentDialogButton.Close,
+            };
+
+            if (await warning.ShowAsync() != ContentDialogResult.Primary)
+            {
+                return;
+            }
+        }
+
+        ViewModel.StatusMessage = null;
+        ViewModel.InfoMessage = "Preparazione delle pagine...";
+        var bytes = await ViewModel.GetCurrentFileBytesAsync();
+        if (bytes is null)
+        {
+            ViewModel.InfoMessage = null;
+            return;
+        }
+
+        try
+        {
+            var organizer = await OrganizePagesViewModel.CreateAsync(
+                bytes, ViewModel.DocumentPassword, ViewModel.DocumentTitle ?? "documento", ViewModel.Thumbnails, ViewModel.CurrentPageIndex);
+
+            // Everything behind the window is out of reach (keyboard included) until it closes.
+            MainCommandBar.IsEnabled = false;
+            ThumbnailSplitView.IsEnabled = false;
+            OrganizeView.Open(organizer);
+        }
+        catch (Exception ex)
+        {
+            ViewModel.StatusMessage = $"Impossibile aprire le pagine: {ex.Message}";
+        }
+        finally
+        {
+            ViewModel.InfoMessage = null;
+        }
+    }
+
+    private async Task CloseOrganizeViewAsync()
+    {
+        await OrganizeView.CloseAsync();
+        MainCommandBar.IsEnabled = true;
+        ThumbnailSplitView.IsEnabled = true;
+    }
+
+    /// <summary>"Chiudi" / Esc: leaves, after asking if there are changes that would be lost.</summary>
+    private async void OnOrganizeCloseRequested(object? sender, EventArgs e)
+    {
+        if (OrganizeView.ViewModel is { HasChanges: true })
+        {
+            var confirm = new ContentDialog
+            {
+                XamlRoot = Content.XamlRoot,
+                Title = "Scartare le modifiche?",
+                Content = "Hai riordinato o eliminato delle pagine senza salvare il nuovo file.",
+                PrimaryButtonText = "Scarta",
+                CloseButtonText = "Continua a modificare",
+                DefaultButton = ContentDialogButton.Close,
+            };
+
+            if (await confirm.ShowAsync() != ContentDialogResult.Primary)
+            {
+                return;
+            }
+        }
+
+        await CloseOrganizeViewAsync();
+    }
+
+    /// <summary>
+    /// "Salva come nuovo PDF...": asks where (a new file, never the open one), writes the pages in their new order, and - unless the
+    /// user turned it off - opens the result. The new file already holds every change the open document had (annotations, filled
+    /// fields, placed form fields), so opening it does not lose anything and the "unsaved changes" question is not asked.
+    /// </summary>
+    private async void OnOrganizeSaveRequested(object? sender, bool openAfterSave)
+    {
+        if (OrganizeView.ViewModel is not { HasChanges: true } organizer)
+        {
+            return;
+        }
+
+        var picker = new FileSavePicker();
+        InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
+        picker.FileTypeChoices.Add("Documento PDF", new List<string> { ".pdf" });
+        picker.SuggestedFileName = $"{Path.GetFileNameWithoutExtension(organizer.Title)}-riordinato";
+
+        var file = await picker.PickSaveFileAsync();
+        if (file is null)
+        {
+            return;
+        }
+
+        OrganizeView.SetSaving(true);
+        try
+        {
+            await organizer.SaveAsync(file.Path);
+        }
+        catch (Exception ex)
+        {
+            OrganizeView.SetSaving(false);
+            ViewModel.StatusMessage = $"Impossibile salvare il nuovo PDF: {ex.Message}";
+            return;
+        }
+
+        var pageCount = organizer.Pages.Count;
+        await CloseOrganizeViewAsync();
+
+        var message = $"Salvato in {file.Path} ({(pageCount == 1 ? "1 pagina" : $"{pageCount} pagine")}).";
+        if (openAfterSave)
+        {
+            ViewModel.HasUnsavedChanges = false;
+            await OpenSourceAsync(CommandLineParser.Classify(file.Path));
+        }
+
+        ViewModel.InfoMessage = message;
+    }
+
     // ---- notes and stamps --------------------------------------------------------------
 
     private void OnStampPresetClicked(object sender, RoutedEventArgs e)
@@ -851,7 +992,12 @@ public sealed partial class MainWindow : Window
 
     private void OnUndoInvoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
     {
-        if (ViewModel.UndoCommand.CanExecute(null))
+        if (OrganizeView.IsOpen)
+        {
+            args.Handled = true;
+            OrganizeView.Undo();
+        }
+        else if (ViewModel.UndoCommand.CanExecute(null))
         {
             args.Handled = true;
             ViewModel.UndoCommand.Execute(null);
@@ -860,7 +1006,12 @@ public sealed partial class MainWindow : Window
 
     private void OnRedoInvoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
     {
-        if (ViewModel.RedoCommand.CanExecute(null))
+        if (OrganizeView.IsOpen)
+        {
+            args.Handled = true;
+            OrganizeView.Redo();
+        }
+        else if (ViewModel.RedoCommand.CanExecute(null))
         {
             args.Handled = true;
             ViewModel.RedoCommand.Execute(null);
@@ -869,7 +1020,12 @@ public sealed partial class MainWindow : Window
 
     private void OnEscapeInvoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
     {
-        if (ViewModel.IsPlacingAnnotation)
+        if (OrganizeView.IsOpen)
+        {
+            args.Handled = true;
+            OnOrganizeCloseRequested(this, EventArgs.Empty);
+        }
+        else if (ViewModel.IsPlacingAnnotation)
         {
             ViewModel.CancelAnnotationTool();
             args.Handled = true;
