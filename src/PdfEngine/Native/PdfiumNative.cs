@@ -55,6 +55,8 @@ internal static class PdfiumNative
 
     // ---- fpdfview.h : bitmap rendering --------------------------------------------------
 
+    /// <summary>Four bytes per pixel (B, G, R, unused): the only bitmap format PDFium draws real LCD (sub-pixel) text on - with an alpha channel it folds the sub-pixels back into gray. fpdfview.h: 1 = gray, 2 = BGR (3 bytes), 3 = BGRx, 4 = BGRA.</summary>
+    public const int FPDFBitmap_BGRx = 3;
     public const int FPDFBitmap_BGRA = 4;
     public const int FPDF_ANNOT = 0x01;
     public const int FPDF_LCD_TEXT = 0x02;

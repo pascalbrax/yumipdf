@@ -643,7 +643,7 @@ public sealed partial class MainWindow : Window
 
     private async void OnSettingsClicked(object sender, RoutedEventArgs e)
     {
-        var dialog = new SettingsDialog(ViewModel.PageAreaBackground.Color, FileAssociationService.IsRegistered(), ViewModel.PageMode, ViewModel.WheelZoom)
+        var dialog = new SettingsDialog(ViewModel.PageAreaBackground.Color, FileAssociationService.IsRegistered(), ViewModel.PageMode, ViewModel.WheelZoom, ViewModel.IsLcdTextEnabled)
         {
             XamlRoot = Content.XamlRoot,
         };
@@ -656,6 +656,7 @@ public sealed partial class MainWindow : Window
 
         ViewModel.UpdateBackgroundColor(dialog.SelectedColor);
         ViewModel.SetWheelZoom(dialog.SelectedWheelZoom);
+        ViewModel.SetLcdText(dialog.LcdText);
 
         if (dialog.SelectedMixedPagesMode != ViewModel.PageMode)
         {

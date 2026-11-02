@@ -39,6 +39,12 @@ public sealed class AppSettings
     [JsonConverter(typeof(JsonStringEnumConverter))]
     public WheelZoomDirection WheelZoom { get; set; } = WheelZoomDirection.UpZoomsIn;
 
+    /// <summary>
+    /// Whether the pages are drawn with LCD (sub-pixel, "ClearType"-like) text: sharper on most monitors, with slight colored edges.
+    /// On by default; turn it off for a screen whose pixels are not R, G, B stripes (or that is rotated).
+    /// </summary>
+    public bool LcdText { get; set; } = true;
+
     /// <summary>The documents opened most recently (paths or URLs), newest first - see <c>MainViewModel.RegisterRecent</c>.</summary>
     public List<string> RecentFiles { get; set; } = new();
 }

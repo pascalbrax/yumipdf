@@ -220,6 +220,36 @@ pagine e non sul documento sotto; "Chiudi" senza modifiche chiude, con modifiche
 nel selettore di file: il nuovo PDF ha le pagine giuste (verificato leggendo il testo di ogni pagina), si apre da solo e la barra di
 stato lo dice. Non provato: documento protetto da password, documento firmato, riordino di piu' pagine selezionate insieme.
 
+## Nitidezza del testo (LCD sub-pixel)
+
+Il testo delle pagine appariva piu' sfocato che in Acrobat. Misurato confrontando i pixel di "User Manual" in due screenshot (7x, senza
+interpolazione): Acrobat usa l'anti-aliasing a **sub-pixel LCD** ("ClearType": bordi nitidi con frange arancio/azzurre, transizioni di 1
+pixel), YumiPDF solo sfumature grigie larghe. Due cause:
+
+1. **Formato della bitmap.** Il rendering passava `FPDF_LCD_TEXT` ma disegnava su una bitmap **BGRA**: con un canale alpha PDFium
+   calcola il sub-pixel e poi lo riduce a grigio (e sfoca). Il vero LCD esiste solo su una bitmap **BGRx** (`FPDFBitmap_BGRx = 3`, quattro
+   byte per pixel con il quarto inutilizzato). Verificato su una pagina di solo testo nero: 0 pixel colorati in BGRA, oltre 800 in BGRx.
+   `PdfPage.RenderToBgra(..., lcdText)` disegna in BGRx con `FPDF_LCD_TEXT` e poi porta a 255 il quarto byte (la bitmap viene usata come
+   BGRA da chi la mostra). Con `lcdText: false` (miniature, OCR, stampa, Organizza pagine) si disegna in BGRA **senza** il flag: grigio
+   normale, senza il passaggio sub-pixel-poi-grigio di prima. `PdfFormFiller.LcdText` fa lo stesso per i render dopo la modifica di un
+   campo; l'app lo allinea all'opzione.
+2. **Immagine ricampionata.** Il bordo di 1 px (`BorderThickness`) del `Border` della pagina toglieva 2 px al contenuto: l'`Image` con
+   `Stretch="Fill"` mostrava la bitmap un po' rimpicciolita, quindi ricampionata. Ora il `Border` non ha spessore e il contorno e' un
+   secondo `Border` sopra l'immagine (`IsHitTestVisible="False"`); in piu' `PdfPageViewModel.ToPixels` restituisce un numero **intero** di
+   pixel (la bitmap e l'elemento hanno la stessa dimensione, mostrata 1:1). Come effetto collaterale i livelli sopra la pagina non sono
+   piu' spostati di 1 px dal bordo.
+
+**Opzione** (Opzioni > "Testo piu' nitido (sub-pixel LCD)", `AppSettings.LcdText`, **attiva** per default): serve a chi ha uno schermo
+ruotato o con sub-pixel non in ordine R, G, B, dove le frange colorate sono un difetto. **Si applica subito**: `MainViewModel.SetLcdText`
+incrementa `RenderSettingsVersion`; `PdfPageViewModel` ricorda con che versione e' stata fatta la sua bitmap
+(`OnBitmapChanged`) e `HasCurrentBitmap` e' falso per le bitmap di una versione vecchia, quindi il ciclo di rendering della finestra di
+pagine (vedi sopra) le rifa' una alla volta, **senza svuotarle prima**: la pagina mostra la vecchia bitmap finche' arriva la nuova. Una bitmap
+che finisce di essere disegnata dopo il cambio viene scartata (confronto di versione). Miniature e OCR non dipendono dall'opzione.
+
+Provato dal vivo sul manuale di 38 pagine (zoom 125%): con l'opzione attiva i pixel colorati nel testo "User Manual" sono 1003 (frange LCD,
+tratti di 3 pixel pieni e transizioni di 1), spenta 0 (solo grigi, ma gia' piu' nitidi di prima), riaccesa di nuovo 1003, identici alla
+prima volta. Il cambio e' avvenuto senza riavvio.
+
 ## Ombra sotto le pagine
 
 Ogni pagina della vista principale ha una leggera ombra (`ThemeShadow` condiviso, risorsa `PageShadow` dell'`ItemsControl`,

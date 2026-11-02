@@ -63,6 +63,12 @@
             </StackPanel>
 
             <StackPanel Spacing="4">
+                <ToggleSwitch x:Name="LcdTextToggle" Header="Testo più nitido (sub-pixel LCD)" OnContent="Attivo" OffContent="Non attivo" />
+                <TextBlock TextWrapping="Wrap" Opacity="0.7" FontSize="12"
+                           Text="Disegna il testo delle pagine come fa Acrobat sui monitor LCD, usando i tre punti colorati di ogni pixel: i caratteri sono più definiti, con un leggero bordo colorato. Disattivalo se hai uno schermo ruotato o con punti non in ordine R, G, B (le lettere avrebbero un alone di colore). Si applica subito." />
+            </StackPanel>
+
+            <StackPanel Spacing="4">
                 <ToggleSwitch x:Name="AssociatePdfToggle" Header="Associa i file .pdf a YumiPDF"
                               OnContent="Attivo" OffContent="Non attivo" />
                 <HyperlinkButton Content="Apri le impostazioni predefinite di Windows..." Click="OnOpenDefaultAppsSettingsClicked" />

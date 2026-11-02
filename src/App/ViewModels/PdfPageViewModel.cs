@@ -107,7 +107,17 @@ public partial class PdfPageViewModel : ObservableObject
     public bool HasCurrentBitmap
         => Bitmap is { } bitmap
             && bitmap.PixelWidth == (int)Math.Round(PixelWidth)
-            && bitmap.PixelHeight == (int)Math.Round(PixelHeight);
+            && bitmap.PixelHeight == (int)Math.Round(PixelHeight)
+            && _bitmapRenderVersion == _owner.RenderSettingsVersion;
+
+    /// <summary>
+    /// <see cref="MainViewModel.RenderSettingsVersion"/> when <see cref="Bitmap"/> was set. A render setting that changes the
+    /// look of a page (LCD text) bumps the version, which makes every bitmap "not current": the page keeps showing its old
+    /// bitmap until the new one replaces it, so the change shows up page by page with no blank in between.
+    /// </summary>
+    private int _bitmapRenderVersion;
+
+    partial void OnBitmapChanged(WriteableBitmap? value) => _bitmapRenderVersion = _owner.RenderSettingsVersion;
 
     /// <summary>
     /// Editable/checkable AcroForm fields on this page (populated once, when the page is
@@ -334,5 +344,9 @@ public partial class PdfPageViewModel : ObservableObject
         }
     }
 
-    private static double ToPixels(double points, double zoom) => Math.Max(1, points * zoom);
+    /// <summary>
+    /// A whole number of pixels: the page is drawn into a bitmap of exactly this size and shown 1:1 - a fractional size makes
+    /// WinUI resample the bitmap (blurring the text) to fit an element that is not a whole number of pixels.
+    /// </summary>
+    private static double ToPixels(double points, double zoom) => Math.Max(1, Math.Round(points * zoom));
 }

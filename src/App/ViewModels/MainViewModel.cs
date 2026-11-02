@@ -218,6 +218,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         IsSnapToGridEnabled = _settings.SnapToGrid;
         _pageMode = _settings.MixedPagesMode;
         WheelZoom = _settings.WheelZoom;
+        IsLcdTextEnabled = _settings.LcdText;
         _restoringSettings = false;
         RefreshRecentEntries();
     }
@@ -566,6 +567,36 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// </summary>
     public bool IsFitWidthActive { get; private set; }
 
+    /// <summary>Whether the pages are drawn with LCD (sub-pixel) text; the choice is in "Opzioni".</summary>
+    public bool IsLcdTextEnabled { get; private set; }
+
+    /// <summary>
+    /// Bumped when a setting that changes how a page is drawn is changed (<see cref="SetLcdText"/>): a bitmap made under an older
+    /// version is not "current" (<see cref="PdfPageViewModel.HasCurrentBitmap"/>) and is drawn again.
+    /// </summary>
+    public int RenderSettingsVersion { get; private set; }
+
+    /// <summary>Changes the option, remembers it, and draws the pages again - at once, page by page, around the one being read.</summary>
+    public void SetLcdText(bool enabled)
+    {
+        if (enabled == IsLcdTextEnabled)
+        {
+            return;
+        }
+
+        IsLcdTextEnabled = enabled;
+        _settings.LcdText = enabled;
+        SaveSettings();
+
+        if (_formFiller is { } filler)
+        {
+            filler.LcdText = enabled;
+        }
+
+        RenderSettingsVersion++;
+        RequestPageWindow();
+    }
+
     /// <summary>Which way the mouse wheel zooms in with CTRL held; the choice is in "Opzioni".</summary>
     public WheelZoomDirection WheelZoom { get; private set; }
 
@@ -702,6 +733,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             }
 
             _formFiller = filler;
+            filler.LcdText = IsLcdTextEnabled;
             foreach (var field in fields)
             {
                 if (field.Type is PdfFormFieldType.ComboBox or PdfFormFieldType.ListBox)
@@ -954,15 +986,16 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// someone just typed does not appear to "revert" the next time the whole document
     /// re-renders (e.g. on a zoom change).
     /// </summary>
-    private static byte[] RenderPageBgra(PdfDocument document, PdfFormFiller? formFiller, int pageIndex, int pixelWidth, int pixelHeight)
+    /// <param name="lcdText">LCD (sub-pixel) text: for the pages shown in the main view; thumbnails and OCR pass <c>false</c>.</param>
+    private static byte[] RenderPageBgra(PdfDocument document, PdfFormFiller? formFiller, int pageIndex, int pixelWidth, int pixelHeight, bool lcdText)
     {
         if (formFiller is not null)
         {
-            return formFiller.RenderPageToBgra(pageIndex, pixelWidth, pixelHeight);
+            return formFiller.RenderPageToBgra(pageIndex, pixelWidth, pixelHeight, lcdText);
         }
 
         using var page = document.GetPage(pageIndex);
-        return page.RenderToBgra(pixelWidth, pixelHeight);
+        return page.RenderToBgra(pixelWidth, pixelHeight, lcdText: lcdText);
     }
 
 
@@ -1143,13 +1176,16 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 var pixelWidth = (int)Math.Round(placeholder.PixelWidth);
                 var pixelHeight = (int)Math.Round(placeholder.PixelHeight);
 
-                var bgra = await Task.Run(() => RenderPageBgra(document, formFiller, pageIndex, pixelWidth, pixelHeight), cts.Token)
+                var lcdText = IsLcdTextEnabled;
+                var renderVersion = RenderSettingsVersion;
+                var bgra = await Task.Run(() => RenderPageBgra(document, formFiller, pageIndex, pixelWidth, pixelHeight, lcdText), cts.Token)
                     .ConfigureAwait(true);
                 cts.Token.ThrowIfCancellationRequested();
 
-                // Zoomed, or scrolled out of the window, while this page was being rendered: that bitmap is no use
-                // (the loop picks the page again, at its new size, if it still needs one).
-                if (pixelWidth != (int)Math.Round(placeholder.PixelWidth)
+                // Zoomed, or scrolled out of the window, or a render option changed, while this page was being rendered: that
+                // bitmap is no use (the loop picks the page again, at its new size and settings, if it still needs one).
+                if (renderVersion != RenderSettingsVersion
+                    || pixelWidth != (int)Math.Round(placeholder.PixelWidth)
                     || pixelHeight != (int)Math.Round(placeholder.PixelHeight)
                     || !CurrentPageWindow().Contains(pageIndex))
                 {
@@ -1640,7 +1676,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     var formFiller = _formFiller;
                     var (width, height) = ThumbnailPixelSize(set[index].AspectRatio);
 
-                    var bgra = await Task.Run(() => RenderPageBgra(document, formFiller, index, width, height), token)
+                    var bgra = await Task.Run(() => RenderPageBgra(document, formFiller, index, width, height, lcdText: false), token)
                         .ConfigureAwait(true);
                     if (token.IsCancellationRequested)
                     {
@@ -2167,7 +2203,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                         height = widthPt > 0 ? Math.Max(1, (int)Math.Round(OcrPixelWidth * heightPt / widthPt)) : OcrPixelWidth;
                     }
 
-                    var bgra = await Task.Run(() => RenderPageBgra(document, formFiller, index, OcrPixelWidth, height), token)
+                    var bgra = await Task.Run(() => RenderPageBgra(document, formFiller, index, OcrPixelWidth, height, lcdText: false), token)
                         .ConfigureAwait(true);
                     if (token.IsCancellationRequested)
                     {

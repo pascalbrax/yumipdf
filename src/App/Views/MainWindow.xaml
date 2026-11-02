@@ -462,7 +462,11 @@
                                     wide as the widest row, and a row does not stretch to it).
                                 -->
                                 <Grid HorizontalAlignment="Left" MinWidth="{x:Bind Owner.PageRowMinWidth, Mode=OneWay}">
-                                <Border HorizontalAlignment="Center" Background="White" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1"
+                                <!--
+                                    No BorderThickness here: a border takes its pixels from the content, so the picture inside would be shown a
+                                    little smaller than its bitmap and resampled (soft text). The outline is drawn on top, last child below.
+                                -->
+                                <Border HorizontalAlignment="Center" Background="White"
                                         Shadow="{StaticResource PageShadow}" Translation="0,0,16"
                                         Width="{x:Bind PixelWidth, Mode=OneWay}" Height="{x:Bind PixelHeight, Mode=OneWay}">
                                     <Grid>
@@ -643,6 +647,9 @@
                                                 </DataTemplate>
                                             </ItemsControl.ItemTemplate>
                                         </ItemsControl>
+
+                                        <!-- The page's outline, over the picture instead of around it (see the note on the Border). -->
+                                        <Border IsHitTestVisible="False" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" />
                                     </Grid>
                                 </Border>
                                 </Grid>

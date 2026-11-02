@@ -555,6 +555,7 @@ public partial class MainViewModel
         var pixelWidth = (int)Math.Round(placeholder.PixelWidth);
         var pixelHeight = (int)Math.Round(placeholder.PixelHeight);
         var relistText = IsTextEditTool;
+        var lcdText = IsLcdTextEnabled;
 
         IsBusy = true;
         IsProgressIndeterminate = true;
@@ -581,7 +582,7 @@ public partial class MainViewModel
                     }
                 }
 
-                return (outcome, list, RenderPageBgra(document, formFiller, pageIndex, pixelWidth, pixelHeight), lines, text);
+                return (outcome, list, RenderPageBgra(document, formFiller, pageIndex, pixelWidth, pixelHeight, lcdText), lines, text);
             }).ConfigureAwait(true);
 
             var bitmap = new WriteableBitmap(pixelWidth, pixelHeight);

@@ -40,14 +40,19 @@ public sealed class PdfPage : IDisposable
     /// will not show up here. Use <see cref="Forms.PdfFormFiller.RenderPageToBgra"/> instead
     /// once a document has an open <see cref="Forms.PdfFormFiller"/> - see its remarks.
     /// </remarks>
-    public byte[] RenderToBgra(int pixelWidth, int pixelHeight, bool renderFormFields = true)
-        => RenderToBgraCore(pixelWidth, pixelHeight, renderFormFields, formHandleForLiveOverlay: IntPtr.Zero);
+    /// <param name="lcdText">
+    /// Draw the text with LCD (sub-pixel, "ClearType"-like) anti-aliasing: sharper on a screen whose pixels are R, G, B stripes, with
+    /// slight colored edges. It needs a bitmap without alpha, so the page is drawn into a BGRx buffer and the returned bytes are made
+    /// opaque (alpha 255) afterwards. Off (the default) is plain gray anti-aliasing - what thumbnails, OCR and printing want.
+    /// </param>
+    public byte[] RenderToBgra(int pixelWidth, int pixelHeight, bool renderFormFields = true, bool lcdText = false)
+        => RenderToBgraCore(pixelWidth, pixelHeight, renderFormFields, formHandleForLiveOverlay: IntPtr.Zero, lcdText);
 
     /// <summary>Same as <see cref="RenderToBgra"/>, plus <c>FPDF_FFLDraw</c> to overlay the live interactive form-fill state - see <see cref="Forms.PdfFormFiller.RenderPageToBgra"/>, the only intended caller.</summary>
-    internal byte[] RenderWithFormOverlay(int pixelWidth, int pixelHeight, IntPtr formHandle)
-        => RenderToBgraCore(pixelWidth, pixelHeight, renderFormFields: true, formHandleForLiveOverlay: formHandle);
+    internal byte[] RenderWithFormOverlay(int pixelWidth, int pixelHeight, IntPtr formHandle, bool lcdText = false)
+        => RenderToBgraCore(pixelWidth, pixelHeight, renderFormFields: true, formHandleForLiveOverlay: formHandle, lcdText);
 
-    private byte[] RenderToBgraCore(int pixelWidth, int pixelHeight, bool renderFormFields, IntPtr formHandleForLiveOverlay)
+    private byte[] RenderToBgraCore(int pixelWidth, int pixelHeight, bool renderFormFields, IntPtr formHandleForLiveOverlay, bool lcdText)
     {
         if (pixelWidth <= 0 || pixelHeight <= 0)
         {
@@ -68,7 +73,7 @@ public sealed class PdfPage : IDisposable
                 ThrowIfDisposed();
 
                 var bitmap = PdfiumNative.FPDFBitmap_CreateEx(
-                    pixelWidth, pixelHeight, PdfiumNative.FPDFBitmap_BGRA, bufferHandle.AddrOfPinnedObject(), stride);
+                    pixelWidth, pixelHeight, lcdText ? PdfiumNative.FPDFBitmap_BGRx : PdfiumNative.FPDFBitmap_BGRA, bufferHandle.AddrOfPinnedObject(), stride);
                 if (bitmap == IntPtr.Zero)
                 {
                     throw PdfException.FromLastPdfiumError("Impossibile creare il bitmap di rendering.");
@@ -77,7 +82,7 @@ public sealed class PdfPage : IDisposable
                 try
                 {
                     PdfiumNative.FPDFBitmap_FillRect(bitmap, 0, 0, pixelWidth, pixelHeight, 0xFFFFFFFF);
-                    var flags = renderFormFields ? PdfiumNative.FPDF_ANNOT | PdfiumNative.FPDF_LCD_TEXT : PdfiumNative.FPDF_LCD_TEXT;
+                    var flags = (renderFormFields ? PdfiumNative.FPDF_ANNOT : 0) | (lcdText ? PdfiumNative.FPDF_LCD_TEXT : 0);
                     PdfiumNative.FPDF_RenderPageBitmap(bitmap, _handle, 0, 0, pixelWidth, pixelHeight, /* rotate */ 0, flags);
 
                     if (formHandleForLiveOverlay != IntPtr.Zero)
@@ -94,6 +99,16 @@ public sealed class PdfPage : IDisposable
         finally
         {
             bufferHandle.Free();
+        }
+
+        if (lcdText)
+        {
+            // A BGRx bitmap leaves the fourth byte of each pixel unspecified, and the buffer is used as BGRA by whoever shows it.
+            var pixels = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, uint>(buffer.AsSpan());
+            for (var index = 0; index < pixels.Length; index++)
+            {
+                pixels[index] |= 0xFF000000u;
+            }
         }
 
         return buffer;

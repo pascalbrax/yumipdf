@@ -225,15 +225,23 @@ public sealed class PdfFormFiller : IDisposable
     /// paints each widget's last-generated appearance stream, which a value change does not
     /// regenerate on its own.
     /// </summary>
-    public byte[] RenderPageToBgra(int pageIndex, int pixelWidth, int pixelHeight)
+    /// <param name="lcdText">LCD (sub-pixel) text for this render; <c>null</c> takes <see cref="LcdText"/>.</param>
+    public byte[] RenderPageToBgra(int pageIndex, int pixelWidth, int pixelHeight, bool? lcdText = null)
     {
         ThrowIfDisposed();
         return PdfiumRuntime.Invoke(() =>
         {
             var page = EnsurePageOpen(pageIndex);
-            return page.RenderWithFormOverlay(pixelWidth, pixelHeight, _formHandle);
+            return page.RenderWithFormOverlay(pixelWidth, pixelHeight, _formHandle, lcdText ?? LcdText);
         });
     }
+
+    /// <summary>
+    /// Whether the renders that follow a field edit (<see cref="SetFieldValueAndRender"/> and the like), and
+    /// <see cref="RenderPageToBgra"/> without an explicit choice, draw text with LCD (sub-pixel) anti-aliasing - see
+    /// <see cref="PdfPage.RenderToBgra"/>. Off by default; the app sets it to follow its option.
+    /// </summary>
+    public bool LcdText { get; set; }
 
     /// <summary>Lists a <see cref="PdfFormFieldType.ComboBox"/>/<see cref="PdfFormFieldType.ListBox"/> field's selectable option labels, in order.</summary>
     public IReadOnlyList<string> GetOptions(PdfFormField field)
@@ -581,7 +589,7 @@ public sealed class PdfFormFiller : IDisposable
 
             edit(page.Handle, annot);
 
-            return page.RenderWithFormOverlay(pixelWidth, pixelHeight, _formHandle);
+            return page.RenderWithFormOverlay(pixelWidth, pixelHeight, _formHandle, LcdText);
         });
 
     /// <summary>Two-pass PDFium string read: first call with a null buffer to get the required byte length (UTF-16LE, NUL-terminated).</summary>
