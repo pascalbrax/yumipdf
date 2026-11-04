@@ -39,6 +39,15 @@ public sealed partial class MainWindow : Window
     private long _ignoreScrollSyncUntil;
     private bool _syncingFromScroll;
     private (int Page, double Fraction)? _zoomAnchor;
+
+    /// <summary>
+    /// Set while a CTRL + wheel zoom is applied: where the pointer is, in the scroll viewer's own coordinates. The zoom then keeps the
+    /// point of the document under the pointer where it is (<see cref="_pointerAnchor"/>) instead of the top of the view.
+    /// </summary>
+    private Windows.Foundation.Point? _zoomPointer;
+
+    /// <summary>The point of the document under the pointer when a wheel zoom starts: the page, and how far across and down it (fractions of its size, which survive the resize).</summary>
+    private (int Page, double FractionX, double FractionY, double ViewX, double ViewY)? _pointerAnchor;
     private bool _closeConfirmed;
 
     public MainViewModel ViewModel { get; } = new();
@@ -59,6 +68,8 @@ public sealed partial class MainWindow : Window
         ViewModel.PropertyChanged += OnViewModelPropertyChanged;
         ViewModel.PagesResizing += OnPagesResizing;
         ViewModel.PagesResized += OnPagesResized;
+        // The percentage button works exactly when the zoom buttons do (a document is open).
+        ViewModel.ZoomInCommand.CanExecuteChanged += (_, _) => ZoomPercentButton.IsEnabled = ViewModel.ZoomInCommand.CanExecute(null);
         PagesScrollViewer.ViewChanged += OnPagesViewChanged;
         PagesScrollViewer.SizeChanged += OnPagesViewportSizeChanged;
         PagesItemsControl.SizeChanged += (_, _) => ScheduleViewedPagesUpdate();
@@ -72,6 +83,15 @@ public sealed partial class MainWindow : Window
         OrganizeView.SaveRequested += OnOrganizeSaveRequested;
         PagesScrollViewer.AddHandler(UIElement.PointerWheelChangedEvent, new PointerEventHandler(OnPagesPointerWheelChanged), handledEventsToo: true);
         AppWindow.Closing += OnAppWindowClosing;
+        // Leaving the window with CTRL held (or any other way the key-up does not arrive) must not leave the pages undrawn.
+        Activated += (_, args) =>
+        {
+            if (args.WindowActivationState == WindowActivationState.Deactivated)
+            {
+                StopCtrlWatch();
+                ViewModel.ResumeRendering();
+            }
+        };
 
         if (_initialSource is not null)
         {
@@ -246,9 +266,17 @@ public sealed partial class MainWindow : Window
         _ignoreScrollSyncUntil = Environment.TickCount64 + ZoomSettleMilliseconds;
 
         var pages = ViewModel.Pages;
+        _pointerAnchor = null;
         if (pages.Count == 0)
         {
             _zoomAnchor = null;
+            return;
+        }
+
+        if (_zoomPointer is { } pointer)
+        {
+            _zoomAnchor = null;
+            _pointerAnchor = PointerAnchorAt(pointer);
             return;
         }
 
@@ -267,9 +295,61 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    /// <summary>Which page, and which spot of it, is under <paramref name="pointer"/> (a position in the scroll viewer) right now.</summary>
+    private (int Page, double FractionX, double FractionY, double ViewX, double ViewY) PointerAnchorAt(Windows.Foundation.Point pointer)
+    {
+        var pages = ViewModel.Pages;
+        var x = PagesScrollViewer.HorizontalOffset + pointer.X;
+        var y = PagesScrollViewer.VerticalOffset + pointer.Y;
+        var top = PagePadding;
+        for (var index = 0; index < pages.Count; index++)
+        {
+            var height = pages[index].PixelHeight;
+            if (y <= top + height + PageSpacing / 2 || index == pages.Count - 1)
+            {
+                var width = pages[index].PixelWidth;
+                return (
+                    index,
+                    width > 0 ? (x - PageLeft(width)) / width : 0.5,
+                    height > 0 ? (y - top) / height : 0,
+                    pointer.X,
+                    pointer.Y);
+            }
+
+            top += height + PageSpacing;
+        }
+
+        return (0, 0.5, 0, pointer.X, pointer.Y);
+    }
+
+    /// <summary>Where a page <paramref name="pageWidth"/> pixels wide starts, from the left edge of the scrolled content: the page is centered in a row that is at least as wide as the window leaves room for.</summary>
+    private double PageLeft(double pageWidth)
+        => PagePadding + (Math.Max(ViewModel.PageRowMinWidth, pageWidth) - pageWidth) / 2;
+
     /// <summary>...and once the pages have their new size, scroll to the same page at the same fraction.</summary>
     private void OnPagesResized()
     {
+        if (_pointerAnchor is { } anchor && anchor.Page < ViewModel.Pages.Count)
+        {
+            _pointerAnchor = null;
+            var pageTop = PagePadding;
+            for (var index = 0; index < anchor.Page; index++)
+            {
+                pageTop += ViewModel.Pages[index].PixelHeight + PageSpacing;
+            }
+
+            var anchored = ViewModel.Pages[anchor.Page];
+            var targetY = Math.Max(0, pageTop + anchor.FractionY * anchored.PixelHeight - anchor.ViewY);
+            var targetX = Math.Max(0, PageLeft(anchored.PixelWidth) + anchor.FractionX * anchored.PixelWidth - anchor.ViewX);
+
+            // As below: the new extent only exists after a layout pass.
+            _ignoreScrollSyncUntil = Environment.TickCount64 + ZoomSettleMilliseconds;
+            PagesScrollViewer.UpdateLayout();
+            PagesScrollViewer.ChangeView(targetX, targetY, null, disableAnimation: true);
+            PublishViewedPages(targetY);
+            return;
+        }
+
         if (_zoomAnchor is not var (page, fraction) || page >= ViewModel.Pages.Count)
         {
             PublishViewedPages();
@@ -643,7 +723,7 @@ public sealed partial class MainWindow : Window
 
     private async void OnSettingsClicked(object sender, RoutedEventArgs e)
     {
-        var dialog = new SettingsDialog(ViewModel.PageAreaBackground.Color, FileAssociationService.IsRegistered(), ViewModel.PageMode, ViewModel.WheelZoom, ViewModel.IsLcdTextEnabled)
+        var dialog = new SettingsDialog(ViewModel.PageAreaBackground.Color, FileAssociationService.IsRegistered(), ViewModel.PageMode, ViewModel.WheelZoom, ViewModel.IsLcdTextEnabled, ViewModel.DeferWheelRender)
         {
             XamlRoot = Content.XamlRoot,
         };
@@ -656,6 +736,7 @@ public sealed partial class MainWindow : Window
 
         ViewModel.UpdateBackgroundColor(dialog.SelectedColor);
         ViewModel.SetWheelZoom(dialog.SelectedWheelZoom);
+        ViewModel.SetDeferWheelRender(dialog.DeferWheelRender);
         ViewModel.SetLcdText(dialog.LcdText);
 
         if (dialog.SelectedMixedPagesMode != ViewModel.PageMode)
@@ -1047,7 +1128,133 @@ public sealed partial class MainWindow : Window
         }
 
         e.Handled = true;
-        await ViewModel.ZoomByWheelAsync(e.GetCurrentPoint(PagesScrollViewer).Properties.MouseWheelDelta);
+
+        // The pages are resized (and the view put back) inside this call: the pointer's position is what the zoom keeps in place.
+        Task zoom;
+        var point = e.GetCurrentPoint(PagesScrollViewer);
+        _zoomPointer = point.Position;
+        try
+        {
+            zoom = ViewModel.ZoomByWheelAsync(point.Properties.MouseWheelDelta);
+        }
+        finally
+        {
+            _zoomPointer = null;
+        }
+
+        if (ViewModel.IsRenderSuspended)
+        {
+            WatchCtrlRelease(ctrlHeld: IsControlDown());
+        }
+
+        await zoom;
+    }
+
+    // ---- fake zoom: the real drawing waits for CTRL to be released ---------------------------------
+
+    /// <summary>How long a "wheel" that is not backed by a held CTRL key (a touchpad pinch, which Windows sends as CTRL + wheel) has to be quiet before the pages are drawn again.</summary>
+    private const long PinchQuietMilliseconds = 250;
+
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _ctrlWatchTimer;
+    private long _lastWheelZoomTick;
+    private bool _ctrlWasHeld;
+
+    private static bool IsControlDown()
+        => Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(Windows.System.VirtualKey.Control)
+            .HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);
+
+    /// <summary>
+    /// Called after every deferred wheel zoom: keeps looking at the CTRL key and, once it is up, lets the view model draw the pages
+    /// (<see cref="MainViewModel.ResumeRendering"/>). A key-up event is not enough on its own (it does not arrive if focus left the
+    /// window), so it is polled; a pinch on a touchpad never holds the key, so there the end of the gesture is a quiet moment.
+    /// </summary>
+    private void WatchCtrlRelease(bool ctrlHeld)
+    {
+        _lastWheelZoomTick = Environment.TickCount64;
+        _ctrlWasHeld |= ctrlHeld;
+        if (_ctrlWatchTimer is null)
+        {
+            _ctrlWatchTimer = DispatcherQueue.CreateTimer();
+            _ctrlWatchTimer.Interval = TimeSpan.FromMilliseconds(40);
+            _ctrlWatchTimer.IsRepeating = true;
+            _ctrlWatchTimer.Tick += (_, _) => OnCtrlWatchTick();
+            Closed += (_, _) => _ctrlWatchTimer.Stop();
+        }
+
+        if (!_ctrlWatchTimer.IsRunning)
+        {
+            _ctrlWatchTimer.Start();
+        }
+    }
+
+    private void OnCtrlWatchTick()
+    {
+        if (IsControlDown())
+        {
+            _ctrlWasHeld = true;
+            return;
+        }
+
+        if (!_ctrlWasHeld && Environment.TickCount64 - _lastWheelZoomTick < PinchQuietMilliseconds)
+        {
+            return;
+        }
+
+        StopCtrlWatch();
+        ViewModel.ResumeRendering();
+    }
+
+    private void StopCtrlWatch()
+    {
+        _ctrlWatchTimer?.Stop();
+        _ctrlWasHeld = false;
+    }
+
+    // ---- the zoom percentage in the toolbar: a click types a new one ---------------------------------
+
+    private void OnZoomPercentClicked(object sender, RoutedEventArgs e)
+    {
+        // The button's own flyout opens on its own; with no document there is nothing to zoom.
+        if (ViewModel.Document is null)
+        {
+            ZoomPercentFlyout.Hide();
+        }
+    }
+
+    private void OnZoomFlyoutOpened(object? sender, object e)
+    {
+        ZoomPercentInput.Text = ViewModel.ZoomPercent.ToString(System.Globalization.CultureInfo.CurrentCulture);
+        ZoomPercentHint.Text = $"Da {ViewModel.MinZoomPercent}% a {ViewModel.MaxZoomPercent}%. Premi Invio.";
+        ZoomPercentInput.Focus(FocusState.Programmatic);
+        ZoomPercentInput.SelectAll();
+    }
+
+    private async void OnZoomInputKeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (e.Key != Windows.System.VirtualKey.Enter)
+        {
+            return;
+        }
+
+        e.Handled = true;
+        if (!TryParsePercent(ZoomPercentInput.Text, out var percent))
+        {
+            ZoomPercentHint.Text = "Scrivi un numero, per esempio 150.";
+            ZoomPercentInput.SelectAll();
+            return;
+        }
+
+        ZoomPercentFlyout.Hide();
+        await ViewModel.SetZoomPercentAsync(percent);
+    }
+
+    /// <summary>"150", "150%", " 87,5 %" - a positive number, with or without the percent sign.</summary>
+    private static bool TryParsePercent(string text, out double percent)
+    {
+        var cleaned = text.Replace("%", string.Empty).Trim().Replace(',', '.');
+        return double.TryParse(cleaned, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out percent)
+            && percent > 0
+            && double.IsFinite(percent);
     }
 
     private void OnPagesPointerPressed(object sender, PointerRoutedEventArgs e)

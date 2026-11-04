@@ -14,11 +14,20 @@ public static class PdfPageOrganizer
     /// Rearranges <paramref name="document"/> so its pages are, in this order, the ones listed in <paramref name="newOrder"/> -
     /// 0-based indices of the pages <em>as they are now</em>. A page that is not listed is removed.
     /// </summary>
-    /// <exception cref="ArgumentException">Nothing is listed (a document needs a page), an index is out of range, or one is listed twice.</exception>
-    public static void Apply(PdfDocument document, IReadOnlyList<int> newOrder)
+    /// <param name="quarterTurns">
+    /// Optional, same length as <paramref name="newOrder"/>: how many quarter turns <em>clockwise</em> to add to each listed page's
+    /// own rotation (<c>/Rotate</c>), in the same order - <c>0</c> leaves a page as it is, <c>3</c> is a quarter turn counter-clockwise.
+    /// Any whole number is accepted (it is taken modulo 4). The page keeps its content; only the way it is shown changes.
+    /// </param>
+    /// <exception cref="ArgumentException">Nothing is listed (a document needs a page), an index is out of range or listed twice, or <paramref name="quarterTurns"/> has the wrong length.</exception>
+    public static void Apply(PdfDocument document, IReadOnlyList<int> newOrder, IReadOnlyList<int>? quarterTurns = null)
     {
         ArgumentNullException.ThrowIfNull(document);
         ArgumentNullException.ThrowIfNull(newOrder);
+        if (quarterTurns is not null && quarterTurns.Count != newOrder.Count)
+        {
+            throw new ArgumentException("Serve una rotazione per ogni pagina elencata.", nameof(quarterTurns));
+        }
 
         var pageCount = document.PageCount;
         if (newOrder.Count == 0)
@@ -63,28 +72,56 @@ public static class PdfPageOrganizer
             }
 
             var moves = newOrder.Select(index => rank[index]).ToArray();
-            if (moves.Select((page, target) => page == target).All(same => same))
+            if (!moves.Select((page, target) => page == target).All(same => same))
+            {
+                // Moving every page, in the wanted order, to the front is the whole reordering in one call.
+                if (PdfiumNative.FPDF_MovePages(document.Handle, moves, (uint)moves.Length, 0) == 0)
+                {
+                    throw PdfException.FromLastPdfiumError("Impossibile riordinare le pagine.");
+                }
+            }
+
+            if (quarterTurns is null)
             {
                 return;
             }
 
-            // Moving every page, in the wanted order, to the front is the whole reordering in one call.
-            if (PdfiumNative.FPDF_MovePages(document.Handle, moves, (uint)moves.Length, 0) == 0)
+            // Rotations last, by the pages' new positions.
+            for (var target = 0; target < quarterTurns.Count; target++)
             {
-                throw PdfException.FromLastPdfiumError("Impossibile riordinare le pagine.");
+                var turns = ((quarterTurns[target] % 4) + 4) % 4;
+                if (turns == 0)
+                {
+                    continue;
+                }
+
+                var pageHandle = PdfiumNative.FPDF_LoadPage(document.Handle, target);
+                if (pageHandle == IntPtr.Zero)
+                {
+                    throw PdfException.FromLastPdfiumError($"Impossibile ruotare la pagina {target + 1}.");
+                }
+
+                try
+                {
+                    PdfiumNative.FPDFPage_SetRotation(pageHandle, (PdfiumNative.FPDFPage_GetRotation(pageHandle) + turns) % 4);
+                }
+                finally
+                {
+                    PdfiumNative.FPDF_ClosePage(pageHandle);
+                }
             }
         });
     }
 
     /// <summary>
-    /// Opens <paramref name="pdf"/> (a whole PDF file in memory), applies <see cref="Apply(PdfDocument, IReadOnlyList{int})"/> and
+    /// Opens <paramref name="pdf"/> (a whole PDF file in memory), applies <see cref="Apply(PdfDocument, IReadOnlyList{int}, IReadOnlyList{int}?)"/> and
     /// returns the result as a new file's bytes. The input is not modified.
     /// </summary>
-    public static byte[] Apply(byte[] pdf, IReadOnlyList<int> newOrder, string? password = null)
+    public static byte[] Apply(byte[] pdf, IReadOnlyList<int> newOrder, string? password = null, IReadOnlyList<int>? quarterTurns = null)
     {
         ArgumentNullException.ThrowIfNull(pdf);
         using var document = PdfDocument.OpenFromBytes(pdf, password);
-        Apply(document, newOrder);
+        Apply(document, newOrder, quarterTurns);
         return document.SaveToBytes();
     }
 }

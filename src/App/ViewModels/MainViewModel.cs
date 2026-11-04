@@ -218,6 +218,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         IsSnapToGridEnabled = _settings.SnapToGrid;
         _pageMode = _settings.MixedPagesMode;
         WheelZoom = _settings.WheelZoom;
+        DeferWheelRender = _settings.DeferRenderOnWheelZoom;
         IsLcdTextEnabled = _settings.LcdText;
         _restoringSettings = false;
         RefreshRecentEntries();
@@ -551,11 +552,21 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private bool HasDocument() => _document is not null;
 
     /// <summary>A manual zoom: it ends "fit width" mode (see <see cref="IsFitWidthActive"/>).</summary>
-    public Task SetZoomAsync(double zoom)
+    /// <param name="deferRender">Only resize the pages (their pictures stretched) and leave drawing them again to <see cref="ResumeRendering"/>.</param>
+    public Task SetZoomAsync(double zoom, bool deferRender = false)
     {
         IsFitWidthActive = false;
-        return ApplyZoomAsync(Math.Clamp(zoom, MinZoom, _maxZoomForDocument));
+        return ApplyZoomAsync(Math.Clamp(zoom, MinZoom, _maxZoomForDocument), deferRender);
     }
+
+    /// <summary>The zoom the user typed in the toolbar, as a percentage (100 = the page's real size at 96 dpi); clamped to <see cref="MinZoomPercent"/>..<see cref="MaxZoomPercent"/>.</summary>
+    public Task SetZoomPercentAsync(double percent) => SetZoomAsync(percent / 100 * BaseZoom);
+
+    /// <summary>The smallest zoom, as the percentage the toolbar shows.</summary>
+    public int MinZoomPercent => (int)Math.Ceiling(MinZoom / BaseZoom * 100 - 0.001);
+
+    /// <summary>The largest zoom the open document allows (a very large page gets less than the usual maximum, see <c>ComputeMaxZoomForDocument</c>), as a percentage.</summary>
+    public int MaxZoomPercent => (int)Math.Floor(_maxZoomForDocument / BaseZoom * 100 + 0.001);
 
     /// <summary>
     /// <c>true</c> from "Adatta a larghezza" until the user zooms by hand, fits the page, or opens
@@ -607,6 +618,57 @@ public partial class MainViewModel : ObservableObject, IDisposable
         SaveSettings();
     }
 
+    /// <summary>
+    /// Whether a CTRL + wheel zoom is a "fake" one - the pages are resized with the pictures they have, stretched - with the
+    /// real drawing started only once CTRL is released (<see cref="ResumeRendering"/>, called by the view). Off: every notch draws
+    /// the pages again, like any other zoom. The choice is in "Opzioni".
+    /// </summary>
+    public bool DeferWheelRender { get; private set; }
+
+    public void SetDeferWheelRender(bool enabled)
+    {
+        DeferWheelRender = enabled;
+        _settings.DeferRenderOnWheelZoom = enabled;
+        SaveSettings();
+
+        if (!enabled)
+        {
+            ResumeRendering();
+        }
+    }
+
+    private bool _renderSuspended;
+
+    /// <summary>
+    /// <c>true</c> between a deferred wheel zoom and <see cref="ResumeRendering"/>: no page is drawn (a loop already running stops at
+    /// its next page) and the bitmaps outside the window are kept, so the stretched pictures stay what the user sees.
+    /// </summary>
+    public bool IsRenderSuspended => _renderSuspended;
+
+    private void SuspendRendering()
+    {
+        if (_renderSuspended)
+        {
+            return;
+        }
+
+        _renderSuspended = true;
+        RenderStatusText = "Rendering al rilascio di CTRL...";
+    }
+
+    /// <summary>Starts the real drawing of the pages that is waiting - those the zoom resized, and those that came into view meanwhile.</summary>
+    public void ResumeRendering()
+    {
+        if (!_renderSuspended)
+        {
+            return;
+        }
+
+        _renderSuspended = false;
+        RenderStatusText = null;
+        RequestPageWindow();
+    }
+
     /// <summary>Zoom step of one wheel notch (a delta of 120): 10 %, so ten notches roughly double the page.</summary>
     private const double WheelZoomStep = 1.1;
 
@@ -622,7 +684,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
 
         var notches = wheelDelta / 120.0 * (WheelZoom == WheelZoomDirection.UpZoomsIn ? 1 : -1);
-        return SetZoomAsync(Zoom * Math.Pow(WheelZoomStep, notches));
+        return SetZoomAsync(Zoom * Math.Pow(WheelZoomStep, notches), deferRender: DeferWheelRender);
     }
 
     /// <summary>
@@ -675,7 +737,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// background (<see cref="RequestPageWindow"/>). Not waiting for it is what keeps the zoom buttons usable - an async
     /// command is disabled until its task completes, which used to be after every page of the document had been rendered.
     /// </summary>
-    private Task ApplyZoomAsync(double newZoom)
+    private Task ApplyZoomAsync(double newZoom, bool deferRender = false)
     {
         if (Math.Abs(newZoom - Zoom) < 0.001 || _document is not { } document)
         {
@@ -701,7 +763,17 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
 
         PagesResized?.Invoke();
-        RequestPageWindow();
+        if (deferRender)
+        {
+            // Wheel zoom with CTRL held: the stretched pictures are what is shown until the view says CTRL is up.
+            SuspendRendering();
+        }
+        else
+        {
+            _renderSuspended = false;
+            RequestPageWindow();
+        }
+
         return Task.CompletedTask;
     }
 
@@ -1057,7 +1129,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// </summary>
     private void RequestPageWindow()
     {
-        if (_document is not { } document || Pages.Count == 0 || Pages.Count != document.PageCount)
+        if (_document is not { } document || Pages.Count == 0 || Pages.Count != document.PageCount || _renderSuspended)
         {
             return;
         }
@@ -1165,6 +1237,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     break;
                 }
 
+                // A deferred wheel zoom is going on: stop here (the page being drawn is dropped, it has the wrong size by now);
+                // ResumeRendering starts a loop again. Not for a document that is still opening.
+                if (_renderSuspended && !isNewDocument)
+                {
+                    break;
+                }
+
                 TrimPagesOutsideWindow();
                 if (NextPageToRender() is not { } placeholder)
                 {
@@ -1231,7 +1310,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
             if (ReferenceEquals(_renderCts, cts))
             {
                 _renderCts = null;
-                RenderStatusText = null;
+                if (!_renderSuspended)
+                {
+                    RenderStatusText = null;
+                }
             }
         }
 

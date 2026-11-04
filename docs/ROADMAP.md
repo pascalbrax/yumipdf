@@ -26,7 +26,10 @@
 - [x] Documenti con pagine di dimensioni diverse (una A3 orizzontale fra tante A4 verticali): le pagine sono sempre centrate nella finestra (riga larga almeno quanto la finestra, bordo di 24 px reale) e un'opzione in Opzioni sceglie come si comporta lo zoom: adatta alla pagina corrente (predefinita), alla larghezza piu' comune, oppure tutte le pagine alla stessa larghezza (`PdfEngine.Viewing.MixedPagesMode`/`PageLayout`, `PdfPageViewModel.Scale`) - vedi docs/ARCHITECTURE.md "Documenti con pagine di dimensioni diverse"
 - [x] Zoom con CTRL + rotellina (10 % per scatto, senza CTRL la rotellina scorre); la direzione (avanti ingrandisce / avanti riduce) e' un'opzione in Opzioni (`WheelZoomDirection`)
 - [x] Barra di stato: "Rendering di N pagine..." mentre il rendering gira in background e, a destra, la memoria usata dall'app (working set del processo, ogni 2 s)
-- [ ] Zoom con CTRL + rotellina ancorato al puntatore del mouse (oggi resta ancorato alla pagina in cima alla vista)
+- [x] Zoom con CTRL + rotellina ancorato al puntatore del mouse: il punto del documento sotto il puntatore resta li' (orizzontalmente e verticalmente) - vedi docs/ARCHITECTURE.md "Ancoraggio al puntatore"
+- [x] Zoom veloce con CTRL + rotellina (opzione, attiva di default): durante la rotellina le pagine si ridimensionano con i bitmap stirati e il rendering vero parte solo al rilascio di CTRL; spenta, lo zoom e' quello di prima - vedi docs/ARCHITECTURE.md "Zoom veloce con CTRL"
+- [x] Zoom con percentuale digitabile: un clic sulla percentuale nella barra apre una casella (Invio applica, limitato a minimo e massimo del documento) - vedi docs/ARCHITECTURE.md "Percentuale digitabile"
+- [ ] Zoom con i pulsanti, "Adatta a ..." e la percentuale digitata: ancorarli al centro della vista invece che alla pagina in cima
 - [x] Testo piu' nitido: rendering LCD sub-pixel (bitmap BGRx) attivabile in Opzioni (attivo di default, applicato subito) e correzione dell'immagine ricampionata dal bordo della pagina - vedi docs/ARCHITECTURE.md "Nitidezza del testo (LCD sub-pixel)"
 - [x] Versionamento (`Directory.Build.props`, un solo `<Version>` per tutti i progetti) e finestra "Informazioni" (`AboutDialog`: versione, breve descrizione, licenze di terze parti)
 - [x] "Recenti" (pannello della barra laterale; ultimi 10 documenti, anche URL; si aggiorna a ogni apertura riuscita, toglie da solo le voci il cui file non esiste più) - vedi docs/ARCHITECTURE.md "File recenti"
@@ -53,7 +56,9 @@
 
 ## Organizzazione delle pagine
 - [x] "Organizza pagine": finestra con le miniature di tutte le pagine, riordino trascinando con il mouse (animato), cestino dove trascinare le pagine da eliminare, selezione multipla, Canc, annulla/ripeti/ripristina; il risultato si salva come **nuovo PDF** (predefinito; si puo' aprire subito) - vedi docs/ARCHITECTURE.md "Organizza pagine". Operazioni sul documento in posizione (`PdfPageOrganizer`: `FPDF_MovePages` + `FPDFPage_Delete`), cosi' indice, campi e metadati restano
-- [ ] Altre operazioni sulle pagine nella stessa finestra: ruotare, estrarre in un nuovo file, inserire pagine da un altro PDF, duplicare
+- [x] Rotazione delle pagine in "Organizza pagine": a sinistra o a destra, per le pagine selezionate (pulsanti, R / MAIUSC+R), animata, con annulla/ripeti; al salvataggio si somma alla rotazione che la pagina ha gia' (`PdfPageOrganizer.Apply(..., quarterTurns)`) - vedi docs/ARCHITECTURE.md "Organizza pagine"
+- [ ] Altre operazioni sulle pagine nella stessa finestra: estrarre in un nuovo file, inserire pagine da un altro PDF, duplicare
+- [ ] Rotazione di una pagina del documento aperto (oggi solo "Organizza pagine" + "salva come nuovo PDF")
 - [ ] Applicare il risultato al documento aperto (oggi solo "salva come nuovo PDF"): servirebbe rimappare tutto cio' che e' indicizzato per pagina (annotazioni, annulla, indice del testo, OCR, campi, miniature, indice)
 - [ ] Riordino con la tastiera nella griglia (oggi solo trascinamento)
 

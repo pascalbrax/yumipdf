@@ -38,6 +38,24 @@
                         <TextBlock Text="Ripristina" />
                     </StackPanel>
                 </Button>
+                <Button x:Name="RotateLeftButton" Click="OnRotateLeftClicked" IsEnabled="False" AutomationProperties.Name="Ruota a sinistra"
+                        ToolTipService.ToolTip="Ruota a sinistra le pagine selezionate (MAIUSC+R)">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <FontIcon Glyph="&#xE14A;" FontSize="14" RenderTransformOrigin="0.5,0.5">
+                            <FontIcon.RenderTransform>
+                                <ScaleTransform ScaleX="-1" />
+                            </FontIcon.RenderTransform>
+                        </FontIcon>
+                        <TextBlock Text="Ruota a sinistra" />
+                    </StackPanel>
+                </Button>
+                <Button x:Name="RotateRightButton" Click="OnRotateRightClicked" IsEnabled="False" AutomationProperties.Name="Ruota a destra"
+                        ToolTipService.ToolTip="Ruota a destra le pagine selezionate (R)">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <FontIcon Glyph="&#xE14A;" FontSize="14" />
+                        <TextBlock Text="Ruota a destra" />
+                    </StackPanel>
+                </Button>
                 <Button x:Name="DeleteSelectedButton" Click="OnDeleteSelectedClicked" IsEnabled="False" AutomationProperties.Name="Elimina selezionate"
                         ToolTipService.ToolTip="Elimina le pagine selezionate (Canc)">
                     <StackPanel Orientation="Horizontal" Spacing="6">
@@ -68,10 +86,18 @@
                     <DataTemplate x:DataType="vm:OrganizePageItem">
                         <StackPanel Width="156" Spacing="6" Padding="4">
                             <Grid Width="148" Height="196">
-                                <Border Width="{x:Bind BoxWidth}" Height="{x:Bind BoxHeight}" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                <Border Width="{x:Bind BoxWidth, Mode=OneWay}" Height="{x:Bind BoxHeight, Mode=OneWay}" HorizontalAlignment="Center" VerticalAlignment="Center"
                                         Background="White" BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}" BorderThickness="1">
                                     <Grid>
-                                        <Image Source="{x:Bind Thumbnail, Mode=OneWay}" Stretch="Fill" />
+                                        <!-- The picture keeps the page's own shape and is turned around its middle: the box around it has the turned shape. -->
+                                        <Image Source="{x:Bind Thumbnail, Mode=OneWay}" Stretch="Fill"
+                                               Width="{x:Bind ImageWidth, Mode=OneWay}" Height="{x:Bind ImageHeight, Mode=OneWay}"
+                                               HorizontalAlignment="Center" VerticalAlignment="Center"
+                                               CenterPoint="{x:Bind ImageCenter, Mode=OneWay}" Rotation="{x:Bind Angle, Mode=OneWay}">
+                                            <Image.RotationTransition>
+                                                <ScalarTransition Duration="0:0:0.25" />
+                                            </Image.RotationTransition>
+                                        </Image>
                                         <ProgressRing Width="20" Height="20" IsActive="{x:Bind HasNoThumbnail, Mode=OneWay}"
                                                       Visibility="{x:Bind HasNoThumbnail, Mode=OneWay}" Foreground="Gray" />
                                     </Grid>
@@ -102,7 +128,7 @@
         <Grid Grid.Row="2" Padding="24,12" ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="16"
               Background="{ThemeResource LayerFillColorDefaultBrush}">
             <TextBlock VerticalAlignment="Center" TextWrapping="Wrap" Opacity="0.7" FontSize="12"
-                       Text="Trascina le miniature per riordinarle e sul cestino per eliminarle. CTRL o MAIUSC per selezionarne più di una. Il documento aperto e il file originale non vengono modificati." />
+                       Text="Trascina le miniature per riordinarle e sul cestino per eliminarle; R ruota a destra, MAIUSC+R a sinistra. CTRL o MAIUSC per selezionarne più di una. Il documento aperto e il file originale non vengono modificati." />
             <CheckBox x:Name="OpenAfterSaveCheck" Grid.Column="1" IsChecked="True" Content="Apri il nuovo file dopo averlo salvato" VerticalAlignment="Center" />
             <Button Grid.Column="2" Content="Chiudi" Click="OnCloseClicked" />
             <Button Grid.Column="3" Style="{StaticResource AccentButtonStyle}" Click="OnSaveClicked"

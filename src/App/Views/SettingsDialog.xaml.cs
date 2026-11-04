@@ -7,7 +7,7 @@ namespace Pdf26.Views;
 
 public sealed partial class SettingsDialog : ContentDialog
 {
-    public SettingsDialog(Color currentPageAreaBackground, bool isPdfAssociated, MixedPagesMode mixedPagesMode, WheelZoomDirection wheelZoom, bool lcdText)
+    public SettingsDialog(Color currentPageAreaBackground, bool isPdfAssociated, MixedPagesMode mixedPagesMode, WheelZoomDirection wheelZoom, bool lcdText, bool deferWheelRender)
     {
         InitializeComponent();
         _currentBackground = currentPageAreaBackground;
@@ -19,7 +19,10 @@ public sealed partial class SettingsDialog : ContentDialog
         MixedPagesOptions.SelectedIndex = (int)mixedPagesMode;
         WheelZoomOptions.SelectedIndex = (int)wheelZoom;
         LcdTextToggle.IsOn = lcdText;
+        DeferWheelRenderToggle.IsOn = deferWheelRender;
     }
+
+    public bool DeferWheelRender => DeferWheelRenderToggle.IsOn;
 
     public bool LcdText => LcdTextToggle.IsOn;
 

@@ -60,6 +60,9 @@
                     <RadioButton Content="Rotellina in avanti ingrandisce, indietro riduce" />
                     <RadioButton Content="Rotellina in avanti riduce, indietro ingrandisce" />
                 </RadioButtons>
+                <ToggleSwitch x:Name="DeferWheelRenderToggle" Header="Zoom veloce: disegna le pagine al rilascio di CTRL" OnContent="Attivo" OffContent="Non attivo" Margin="0,8,0,0" />
+                <TextBlock TextWrapping="Wrap" Opacity="0.7" FontSize="12"
+                           Text="Mentre giri la rotellina con CTRL premuto le pagine si ingrandiscono o riducono usando l'immagine che hanno già (più sgranata); il disegno nitido parte solo quando rilasci CTRL. Se è disattivo, ogni scatto ridisegna le pagine, come per gli altri zoom." />
             </StackPanel>
 
             <StackPanel Spacing="4">

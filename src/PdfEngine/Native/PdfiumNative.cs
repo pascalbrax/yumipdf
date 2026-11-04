@@ -112,6 +112,13 @@ internal static class PdfiumNative
     [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
     public static extern int FPDF_MovePages(IntPtr document, int[] pageIndices, uint pageIndicesLength, int destPageIndex);
 
+    /// <summary>The page's own /Rotate, in quarter turns clockwise (0..3) - fpdf_edit.h.</summary>
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern int FPDFPage_GetRotation(IntPtr page);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.StdCall)]
+    public static extern void FPDFPage_SetRotation(IntPtr page, int rotate);
+
     // ---- fpdf_annot.h : markup annotations (highlight / note / ink / stamp) ------------
 
     public enum FPDF_ANNOTATION_SUBTYPE

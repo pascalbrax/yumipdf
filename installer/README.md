@@ -34,7 +34,7 @@ Dopo aver preparato il pacchetto, verificarlo anche dalla cartella estratta: apr
 Stampa, controllare l'anteprima e annullare; riaprire Stampa e produrre un file con Microsoft Print to PDF.
 Il collaudo della build non sostituisce questa verifica del pacchetto distribuito.
 
-Il pacchetto `YumiPDF-0.3.1-win-x64-portable.zip` in `installer/out/` contiene la nuova stampa (verificato
+Il pacchetto `YumiPDF-0.4.0-win-x64-portable.zip` in `installer/out/` contiene la nuova stampa (verificato
 estraendolo in una cartella nuova: parte, il pannello di stampa si apre e si annulla, la finestra Informazioni è corretta).
 I file ZIP non vengono aggiornati da `dotnet build`: dopo ogni modifica occorre pubblicare nuovamente l'app e ricreare il pacchetto. Per il flusso utente e i limiti
 vedi la [guida alla stampa](../docs/STAMPA.md).
@@ -78,17 +78,17 @@ Senza un vero installer, la distribuzione più semplice è pubblicare e zippare 
 ```
 dotnet publish src/App/App.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=false
 ```
-L'output finisce in `src/App/bin/Release/net10.0-windows10.0.19041.0/win-x64/publish/` (~270 MB, self-
+L'output finisce in `src/App/bin/Release/net10.0-windows10.0.19041.0/win-x64/publish/` (~193 MB, self-
 contained: include il runtime .NET e Windows App SDK, non richiede nulla preinstallato sulla macchina di
-destinazione oltre a Windows 10 1809+/11). Zippato (`installer/out/`, ignorato da git) pesa circa 100 MB.
+destinazione oltre a Windows 10 1809+/11). Zippato (`installer/out/`, ignorato da git) pesa circa 75 MB.
 Nessuna voce nel menu Start, nessun disinstallatore: l'utente estrae la cartella e avvia `YumiPDF.exe`
 direttamente. Senza certificato di firma del codice, Windows SmartScreen avviserà comunque al primo avvio -
 non evitabile senza un certificato EV/OV (vedi sopra).
 
-### Zip portable (come è stato fatto per la 0.3.1)
+### Zip portable (come è stato fatto per la 0.4.0)
 
-`installer/out/YumiPDF-<versione>-win-x64-portable.zip` (circa 107 MB; la cartella `installer/out/` è ignorata da git). Contiene una
+`installer/out/YumiPDF-<versione>-win-x64-portable.zip` (circa 75 MB; la cartella `installer/out/` è ignorata da git). Contiene una
 cartella `YumiPDF/` con l'output del publish **senza i `.pdb`** (simboli di debug) più un `LEGGIMI.txt` (uso, dove stanno le
 preferenze, nota su SmartScreen, licenze: iText è AGPL, quindi indica il repository con i sorgenti). Si crea con `ZipArchive` di
 .NET dopo il `dotnet publish` qui sopra. Verificato estraendolo in una cartella nuova e avviando `YumiPDF.exe` da lì: parte,
-apre un PDF, la finestra "Informazioni" mostra la versione 0.3.1 e la data di build.
+apre un PDF, la finestra "Informazioni" mostra la versione 0.4.0 e la data di build.

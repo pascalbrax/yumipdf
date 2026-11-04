@@ -22,7 +22,7 @@ Il pannello "Strumenti" (note, timbri, modifica del testo, campi modulo) e la fi
 - Apertura da riga di comando di file locali, percorsi UNC di rete e URL HTTP/HTTPS pubblici
 - Visualizzazione a scorrimento continuo di tutte le pagine (rendering PDFium), con placeholder
   dimensionati subito e bitmap popolati progressivamente
-- Zoom (+/-, percentuale, CTRL + rotellina) e adatta a larghezza/pagina
+- Zoom (+/-, percentuale da digitare, CTRL + rotellina ancorata al puntatore) e adatta a larghezza/pagina
 - Testo nitido come in Acrobat: rendering a sub-pixel LCD (ClearType), disattivabile dalle Opzioni
 - Apertura di documenti protetti da password, con richiesta e nuovo tentativo in caso di errore
 - Sfondo dell'area pagina a scelta fra 16 colori pastello (menu Opzioni)

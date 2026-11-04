@@ -22,13 +22,64 @@ public sealed partial class OrganizePageItem : ObservableObject
     /// <summary>0-based position in the document as it was when the window opened.</summary>
     public int SourceIndex { get; }
 
-    /// <summary>Page height divided by width.</summary>
+    /// <summary>Page height divided by width, as the page is in the document (before any turn made in this window).</summary>
     public double AspectRatio { get; }
 
-    /// <summary>Size, in pixels, of the box that holds the thumbnail in the grid: the page's shape, fitted in 148 x 196.</summary>
-    public double BoxWidth => Math.Min(148, 196 / AspectRatio);
+    /// <summary>Quarter turns clockwise made to this page in this window (0..3), on top of the rotation the page already has.</summary>
+    public int Turns { get; private set; }
 
-    public double BoxHeight => BoxWidth * AspectRatio;
+    /// <summary>
+    /// The angle, in degrees, the thumbnail is shown at. Unlike <see cref="Turns"/> it does not wrap around: after three clockwise turns
+    /// it is 270 and a fourth makes it 360, so the picture keeps turning the same way instead of spinning back (the animation
+    /// goes from the old angle to the new one).
+    /// </summary>
+    public float Angle { get; private set; }
+
+    /// <summary>
+    /// Turns the page to <paramref name="turns"/> (0..3) by the shortest way: a quarter turn either way, or a half turn.
+    /// Nothing is recorded in the undo history here - the view model does that once per user action.
+    /// </summary>
+    internal void SetTurns(int turns)
+    {
+        turns = ((turns % 4) + 4) % 4;
+        var delta = ((turns - Turns) % 4 + 4) % 4;
+        if (delta == 3)
+        {
+            delta = -1;
+        }
+
+        if (delta == 0)
+        {
+            return;
+        }
+
+        Turns = turns;
+        Angle += delta * 90f;
+        OnPropertyChanged(nameof(Turns));
+        OnPropertyChanged(nameof(Angle));
+        OnPropertyChanged(nameof(BoxWidth));
+        OnPropertyChanged(nameof(BoxHeight));
+        OnPropertyChanged(nameof(ImageWidth));
+        OnPropertyChanged(nameof(ImageHeight));
+        OnPropertyChanged(nameof(ImageCenter));
+        OnPropertyChanged(nameof(Caption));
+    }
+
+    /// <summary>Page height divided by width as it shows now: upside down in ratio after a quarter turn.</summary>
+    private double ShownAspectRatio => Turns % 2 == 0 ? AspectRatio : 1 / AspectRatio;
+
+    /// <summary>Size, in pixels, of the box that holds the thumbnail in the grid: the page's shape, as it is turned now, fitted in 148 x 196.</summary>
+    public double BoxWidth => Math.Min(148, 196 / ShownAspectRatio);
+
+    public double BoxHeight => BoxWidth * ShownAspectRatio;
+
+    // The picture itself keeps the page's own shape and is turned by Angle around its middle, so on a quarter turn its width is the
+    // box's height (less the 1 px border on each side).
+    public double ImageWidth => (Turns % 2 == 0 ? BoxWidth : BoxHeight) - 2;
+
+    public double ImageHeight => (Turns % 2 == 0 ? BoxHeight : BoxWidth) - 2;
+
+    public System.Numerics.Vector3 ImageCenter => new((float)ImageWidth / 2, (float)ImageHeight / 2, 0);
 
     /// <summary><c>null</c> until the background rendering reaches this page (or the main window already had one).</summary>
     [ObservableProperty]
@@ -43,8 +94,21 @@ public sealed partial class OrganizePageItem : ObservableObject
 
     public bool IsMoved => Position - 1 != SourceIndex;
 
-    /// <summary>"3", or "3 (era 7)" for a page that is no longer where it was.</summary>
-    public string Caption => IsMoved ? $"{Position}  (era {SourceIndex + 1})" : Position.ToString();
+    /// <summary>"3", or "3 (era 7)" for a page that is no longer where it was, plus "↻ 90°" (or 180°, "↺ 90°") for one that is turned.</summary>
+    public string Caption
+    {
+        get
+        {
+            var text = IsMoved ? $"{Position}  (era {SourceIndex + 1})" : Position.ToString();
+            return Turns switch
+            {
+                1 => text + "  ↻ 90°",
+                2 => text + "  ↻ 180°",
+                3 => text + "  ↺ 90°",
+                _ => text,
+            };
+        }
+    }
 
     public bool HasNoThumbnail => Thumbnail is null;
 
@@ -70,9 +134,15 @@ public sealed partial class OrganizePagesViewModel : ObservableObject
     private readonly string? _password;
     private readonly PdfDocument _working;
     private readonly List<OrganizePageItem> _all;
-    private readonly List<int[]> _history = new();
+    private readonly List<Snapshot> _history = new();
     private int _historyIndex;
     private bool _applyingHistory;
+
+    /// <summary>One undo step: the pages kept, in order (by source index), and the turns of every page of the document (indexed by source index).</summary>
+    private sealed record Snapshot(int[] Order, int[] Turns)
+    {
+        public bool SameAs(Snapshot other) => Order.AsSpan().SequenceEqual(other.Order) && Turns.AsSpan().SequenceEqual(other.Turns);
+    }
 
     private readonly HashSet<OrganizePageItem> _wanted = new();
     private readonly CancellationTokenSource _loaderCts = new();
@@ -88,7 +158,7 @@ public sealed partial class OrganizePagesViewModel : ObservableObject
         StartPageIndex = startPage;
         Pages = new ObservableCollection<OrganizePageItem>(items);
         Pages.CollectionChanged += OnPagesChanged;
-        _history.Add(CurrentOrder());
+        _history.Add(CurrentSnapshot());
     }
 
     /// <summary>The document's name, for the suggested name of the new file.</summary>
@@ -104,23 +174,34 @@ public sealed partial class OrganizePagesViewModel : ObservableObject
 
     public int RemovedCount => _all.Count - Pages.Count;
 
-    /// <summary>"12 pagine · 3 eliminate": what the document will have, and what is being left out.</summary>
+    public int RotatedCount => Pages.Count(page => page.Turns != 0);
+
+    /// <summary>"12 pagine · 3 eliminate · 2 ruotate": what the document will have, and what is being changed.</summary>
     public string Summary
     {
         get
         {
-            var kept = Pages.Count == 1 ? "1 pagina" : $"{Pages.Count} pagine";
-            return RemovedCount switch
+            var text = Pages.Count == 1 ? "1 pagina" : $"{Pages.Count} pagine";
+            text += RemovedCount switch
             {
-                0 => kept,
-                1 => $"{kept} · 1 eliminata",
-                _ => $"{kept} · {RemovedCount} eliminate",
+                0 => string.Empty,
+                1 => " · 1 eliminata",
+                _ => $" · {RemovedCount} eliminate",
+            };
+            return RotatedCount switch
+            {
+                0 => text,
+                1 => text + " · 1 ruotata",
+                var count => text + $" · {count} ruotate",
             };
         }
     }
 
     /// <summary>Whether the pages differ from the document's: only then is there anything to save.</summary>
-    public bool HasChanges => Pages.Count != _all.Count || Pages.Select((page, index) => page.SourceIndex != index).Any(different => different);
+    public bool HasChanges
+        => Pages.Count != _all.Count
+           || Pages.Select((page, index) => page.SourceIndex != index).Any(different => different)
+           || Pages.Any(page => page.Turns != 0);
 
     public bool CanUndo => _historyIndex > 0;
 
@@ -181,7 +262,19 @@ public sealed partial class OrganizePagesViewModel : ObservableObject
         Commit();
     }
 
-    /// <summary>Records the current list as one undo step, if it differs from the last one - called when a drag ends.</summary>
+    /// <summary>A quarter turn for each of the pages (the rotate buttons), one undo step for all of them.</summary>
+    /// <param name="clockwise"><c>true</c> to turn them to the right, <c>false</c> to the left.</param>
+    public void Rotate(IEnumerable<OrganizePageItem> items, bool clockwise)
+    {
+        foreach (var item in items.ToList())
+        {
+            item.SetTurns(item.Turns + (clockwise ? 1 : 3));
+        }
+
+        Commit();
+    }
+
+    /// <summary>Records the current list (and the turns) as one undo step, if it differs from the last one - called when a drag ends.</summary>
     public void Commit()
     {
         if (_applyingHistory)
@@ -189,14 +282,14 @@ public sealed partial class OrganizePagesViewModel : ObservableObject
             return;
         }
 
-        var order = CurrentOrder();
-        if (order.AsSpan().SequenceEqual(_history[_historyIndex]))
+        var snapshot = CurrentSnapshot();
+        if (snapshot.SameAs(_history[_historyIndex]))
         {
             return;
         }
 
         _history.RemoveRange(_historyIndex + 1, _history.Count - _historyIndex - 1);
-        _history.Add(order);
+        _history.Add(snapshot);
         _historyIndex = _history.Count - 1;
         NotifyHistory();
     }
@@ -217,18 +310,28 @@ public sealed partial class OrganizePagesViewModel : ObservableObject
         }
     }
 
-    /// <summary>Back to the document's own order, with every page; one undo step.</summary>
+    /// <summary>Back to the document's own order, with every page and none turned; one undo step.</summary>
     public void Reset()
     {
-        ApplyOrder(Enumerable.Range(0, _all.Count).ToArray());
+        ApplySnapshot(new Snapshot(Enumerable.Range(0, _all.Count).ToArray(), new int[_all.Count]));
         Commit();
     }
 
     private void Go(int historyIndex)
     {
         _historyIndex = historyIndex;
-        ApplyOrder(_history[historyIndex]);
+        ApplySnapshot(_history[historyIndex]);
         NotifyHistory();
+    }
+
+    private void ApplySnapshot(Snapshot snapshot)
+    {
+        for (var index = 0; index < _all.Count; index++)
+        {
+            _all[index].SetTurns(snapshot.Turns[index]);
+        }
+
+        ApplyOrder(snapshot.Order);
     }
 
     /// <summary>
@@ -278,6 +381,8 @@ public sealed partial class OrganizePagesViewModel : ObservableObject
 
     private int[] CurrentOrder() => Pages.Select(page => page.SourceIndex).ToArray();
 
+    private Snapshot CurrentSnapshot() => new(CurrentOrder(), _all.Select(page => page.Turns).ToArray());
+
     private void OnPagesChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
         if (!_applyingHistory)
@@ -295,6 +400,7 @@ public sealed partial class OrganizePagesViewModel : ObservableObject
 
         OnPropertyChanged(nameof(Summary));
         OnPropertyChanged(nameof(RemovedCount));
+        OnPropertyChanged(nameof(RotatedCount));
         OnPropertyChanged(nameof(HasChanges));
     }
 
@@ -302,16 +408,19 @@ public sealed partial class OrganizePagesViewModel : ObservableObject
     {
         OnPropertyChanged(nameof(CanUndo));
         OnPropertyChanged(nameof(CanRedo));
+        OnPropertyChanged(nameof(Summary));
+        OnPropertyChanged(nameof(RotatedCount));
         OnPropertyChanged(nameof(HasChanges));
     }
 
     // ---- saving ----------------------------------------------------------------------
 
-    /// <summary>Writes the pages, in their new order and without the removed ones, to a new file. The document that is open and the original file stay as they are.</summary>
+    /// <summary>Writes the pages, in their new order, turned as they are shown and without the removed ones, to a new file. The document that is open and the original file stay as they are.</summary>
     public Task SaveAsync(string destinationPath)
     {
         var order = CurrentOrder();
-        return Task.Run(() => File.WriteAllBytes(destinationPath, PdfPageOrganizer.Apply(_pdf, order, _password)));
+        var turns = Pages.Select(page => page.Turns).ToArray();
+        return Task.Run(() => File.WriteAllBytes(destinationPath, PdfPageOrganizer.Apply(_pdf, order, _password, turns)));
     }
 
     // ---- thumbnails ------------------------------------------------------------------

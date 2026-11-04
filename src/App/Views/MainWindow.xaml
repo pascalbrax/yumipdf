@@ -34,7 +34,21 @@
             <AppBarSeparator />
             <AppBarButton Icon="ZoomOut" Label="Riduci" Command="{x:Bind ViewModel.ZoomOutCommand}" />
             <AppBarElementContainer VerticalContentAlignment="Center">
-                <TextBlock Text="{x:Bind ViewModel.ZoomPercentText, Mode=OneWay}" MinWidth="48" TextAlignment="Center" />
+                <!-- The zoom percentage is a button: a click opens a small box to type another one (OnZoomPercentClicked). -->
+                <Button x:Name="ZoomPercentButton" Content="{x:Bind ViewModel.ZoomPercentText, Mode=OneWay}" MinWidth="56" Padding="8,4"
+                        Background="Transparent" BorderThickness="0" IsEnabled="False" Click="OnZoomPercentClicked"
+                        AutomationProperties.Name="Percentuale di zoom" ToolTipService.ToolTip="Clicca per scrivere una percentuale di zoom">
+                    <Button.Flyout>
+                        <Flyout x:Name="ZoomPercentFlyout" Placement="Bottom" Opened="OnZoomFlyoutOpened">
+                            <StackPanel Spacing="8" Width="180">
+                                <TextBlock Text="Zoom (%)" />
+                                <TextBox x:Name="ZoomPercentInput" InputScope="Number" MaxLength="6" AutomationProperties.Name="Nuova percentuale di zoom"
+                                         KeyDown="OnZoomInputKeyDown" />
+                                <TextBlock x:Name="ZoomPercentHint" FontSize="12" Opacity="0.7" TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Flyout>
+                    </Button.Flyout>
+                </Button>
             </AppBarElementContainer>
             <AppBarButton Icon="ZoomIn" Label="Ingrandisci" Command="{x:Bind ViewModel.ZoomInCommand}" />
             <AppBarButton Label="Adatta a larghezza" Click="OnFitWidthClicked" />

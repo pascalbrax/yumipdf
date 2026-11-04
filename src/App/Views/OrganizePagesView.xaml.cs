@@ -47,6 +47,8 @@ public sealed partial class OrganizePagesView : UserControl
         Bindings.Update();
         SavingPanel.Visibility = Visibility.Collapsed;
         DeleteSelectedButton.IsEnabled = false;
+        RotateLeftButton.IsEnabled = false;
+        RotateRightButton.IsEnabled = false;
         Visibility = Visibility.Visible;
 
         // Start at the page the main window was showing.
@@ -93,12 +95,21 @@ public sealed partial class OrganizePagesView : UserControl
 
     private void OnDeleteSelectedClicked(object sender, RoutedEventArgs e) => RemoveSelected();
 
+    private void OnRotateLeftClicked(object sender, RoutedEventArgs e) => RotateSelected(clockwise: false);
+
+    private void OnRotateRightClicked(object sender, RoutedEventArgs e) => RotateSelected(clockwise: true);
+
     private void OnCloseClicked(object sender, RoutedEventArgs e) => CloseRequested?.Invoke(this, EventArgs.Empty);
 
     private void OnSaveClicked(object sender, RoutedEventArgs e) => SaveRequested?.Invoke(this, OpenAfterSave);
 
     private void OnSelectionChanged(object sender, SelectionChangedEventArgs e)
-        => DeleteSelectedButton.IsEnabled = PagesGrid.SelectedItems.Count > 0;
+    {
+        var any = PagesGrid.SelectedItems.Count > 0;
+        DeleteSelectedButton.IsEnabled = any;
+        RotateLeftButton.IsEnabled = any;
+        RotateRightButton.IsEnabled = any;
+    }
 
     private void OnGridKeyDown(object sender, KeyRoutedEventArgs e)
     {
@@ -106,6 +117,24 @@ public sealed partial class OrganizePagesView : UserControl
         {
             RemoveSelected();
             e.Handled = true;
+        }
+        else if (e.Key == VirtualKey.R
+            && !Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Control).HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down))
+        {
+            // R turns the selected pages to the right, Shift+R to the left.
+            RotateSelected(clockwise: !Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Shift).HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down));
+            e.Handled = true;
+        }
+    }
+
+    private void RotateSelected(bool clockwise)
+    {
+        if (ViewModel is { } viewModel && PagesGrid.SelectedItems.OfType<OrganizePageItem>().ToList() is { Count: > 0 } selected)
+        {
+            viewModel.Rotate(selected, clockwise);
+
+            // After a click on one of the buttons, the keys (R, Delete) keep working on the pages.
+            PagesGrid.Focus(FocusState.Programmatic);
         }
     }
 

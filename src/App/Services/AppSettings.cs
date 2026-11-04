@@ -40,6 +40,12 @@ public sealed class AppSettings
     public WheelZoomDirection WheelZoom { get; set; } = WheelZoomDirection.UpZoomsIn;
 
     /// <summary>
+    /// Whether a CTRL + wheel zoom only stretches the pictures the pages already have (a "fake" zoom, fast) and draws the pages again
+    /// once CTRL is released, instead of drawing them again after every notch. On by default.
+    /// </summary>
+    public bool DeferRenderOnWheelZoom { get; set; } = true;
+
+    /// <summary>
     /// Whether the pages are drawn with LCD (sub-pixel, "ClearType"-like) text: sharper on most monitors, with slight colored edges.
     /// On by default; turn it off for a screen whose pixels are not R, G, B stripes (or that is rotated).
     /// </summary>
