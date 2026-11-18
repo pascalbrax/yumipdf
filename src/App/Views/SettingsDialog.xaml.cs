@@ -7,7 +7,7 @@ namespace Pdf26.Views;
 
 public sealed partial class SettingsDialog : ContentDialog
 {
-    public SettingsDialog(Color currentPageAreaBackground, bool isPdfAssociated, MixedPagesMode mixedPagesMode, WheelZoomDirection wheelZoom, bool lcdText, bool deferWheelRender)
+    public SettingsDialog(Color currentPageAreaBackground, bool isPdfAssociated, MixedPagesMode mixedPagesMode, WheelZoomDirection wheelZoom, bool lcdText, bool deferWheelRender, OpenZoomMode openZoom)
     {
         InitializeComponent();
         _currentBackground = currentPageAreaBackground;
@@ -20,7 +20,12 @@ public sealed partial class SettingsDialog : ContentDialog
         WheelZoomOptions.SelectedIndex = (int)wheelZoom;
         LcdTextToggle.IsOn = lcdText;
         DeferWheelRenderToggle.IsOn = deferWheelRender;
+        OpenZoomOptions.SelectedIndex = (int)openZoom;
     }
+
+    /// <summary>The options are listed in the order of <see cref="OpenZoomMode"/>.</summary>
+    public OpenZoomMode SelectedOpenZoom
+        => Enum.IsDefined((OpenZoomMode)OpenZoomOptions.SelectedIndex) ? (OpenZoomMode)OpenZoomOptions.SelectedIndex : OpenZoomMode.ActualSize;
 
     public bool DeferWheelRender => DeferWheelRenderToggle.IsOn;
 

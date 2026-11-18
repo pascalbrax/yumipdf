@@ -29,6 +29,7 @@
 - [x] Zoom con CTRL + rotellina ancorato al puntatore del mouse: il punto del documento sotto il puntatore resta li' (orizzontalmente e verticalmente) - vedi docs/ARCHITECTURE.md "Ancoraggio al puntatore"
 - [x] Zoom veloce con CTRL + rotellina (opzione, attiva di default): durante la rotellina le pagine si ridimensionano con i bitmap stirati e il rendering vero parte solo al rilascio di CTRL; spenta, lo zoom e' quello di prima - vedi docs/ARCHITECTURE.md "Zoom veloce con CTRL"
 - [x] Zoom con percentuale digitabile: un clic sulla percentuale nella barra apre una casella (Invio applica, limitato a minimo e massimo del documento) - vedi docs/ARCHITECTURE.md "Percentuale digitabile"
+- [x] Visualizzazione all'apertura scelta dall'utente (Opzioni): adatta a larghezza, adatta a pagina o 100 % (predefinito) - vedi docs/ARCHITECTURE.md "Visualizzazione all'apertura"
 - [ ] Zoom con i pulsanti, "Adatta a ..." e la percentuale digitata: ancorarli al centro della vista invece che alla pagina in cima
 - [x] Testo piu' nitido: rendering LCD sub-pixel (bitmap BGRx) attivabile in Opzioni (attivo di default, applicato subito) e correzione dell'immagine ricampionata dal bordo della pagina - vedi docs/ARCHITECTURE.md "Nitidezza del testo (LCD sub-pixel)"
 - [x] Versionamento (`Directory.Build.props`, un solo `<Version>` per tutti i progetti) e finestra "Informazioni" (`AboutDialog`: versione, breve descrizione, licenze di terze parti)
@@ -80,6 +81,9 @@
 ## M3 - Editor / annotazioni avanzate
 - [x] Nota e timbro (testuale con data opzionale, o immagine dell'utente): pannello laterale "Strumenti" (pulsante in barra) + "Salva con nome...", selezione/spostamento/ridimensionamento/eliminazione sulla pagina, avviso di modifiche non salvate - vedi docs/ARCHITECTURE.md "Annotazioni: note e timbri"
 - [x] Modifica del testo già presente (solo riga per riga, nessun riflusso): "Modifica testo" nel pannello "Strumenti"; una riga con lettere che il suo font non ha viene riscritta con un font open source incorporato (Liberation/Noto Sans, SIL OFL, ridotti a latino/greco/cirillico) scelto per somigliare all'originale - vedi docs/ARCHITECTURE.md "Modifica del testo esistente"
+- [x] Aggiungere una riga di testo (pannello "Strumenti" > "Nuovo testo"): clic sulla pagina, dimensione e colore scelti nel pannello; e' contenuto della pagina (selezionabile, ricercabile), si riscrive con "Modifica testo" e si annulla con Ctrl+Z - vedi docs/ARCHITECTURE.md "Aggiungere una riga di testo"
+- [x] Spostare col mouse una riga di testo (aggiunta dal pannello o gia' presente nel documento): in "Modifica testo" si trascina il riquadro, con aggancio alla griglia e Ctrl+Z; dopo "Aggiungi una riga di testo" la riga nuova e' gia' selezionata e trascinabile - vedi docs/ARCHITECTURE.md "Spostare una riga di testo"
+- [ ] Riga di testo aggiunta: scelta del font, grassetto/corsivo, ricordare dimensione e colore fra le sessioni, testo su piu' righe
 - [ ] Editing di **immagini** esistenti (sposta, ridimensiona, sostituisci, elimina): non richiesto per ora, lo stesso meccanismo (oggetti pagina staccati/reinseriti) dovrebbe bastare
 - [ ] Testo dentro i Form XObject (alcuni produttori avvolgono tutta la pagina in uno): oggi non compare fra le righe modificabili
 - [ ] Caratteri fuori da latino/greco/cirillico (CJK, arabo, ebraico, ...): nessun font incorporato li ha, appaiono come riquadri vuoti (l'app lo segnala)
@@ -100,7 +104,7 @@ non a livello di installer - scelta esplicita dell'utente invece di una registra
 silenziosa all'installazione.
 
 ## Backlog / non pianificato
-- Testo libero (annotazione di testo scritta direttamente sulla pagina) - spostato da M3
+- Testo libero come annotazione (movibile e ridimensionabile come i timbri; la riga di testo aggiunta dal pannello "Strumenti" e' invece contenuto della pagina) - spostato da M3
 - Disegno a mano libera (ink) - spostato da M3
 - Supporto XFA (fuori scope per scelta di progetto)
 - Cloud storage autenticato (OneDrive/SharePoint/Google Drive) per l'apertura da riga di comando - oggi si supportano solo URL HTTP/HTTPS pubblici

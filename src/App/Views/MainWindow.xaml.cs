@@ -68,6 +68,7 @@ public sealed partial class MainWindow : Window
         ViewModel.PropertyChanged += OnViewModelPropertyChanged;
         ViewModel.PagesResizing += OnPagesResizing;
         ViewModel.PagesResized += OnPagesResized;
+        ViewModel.ViewportProvider = () => (PagesScrollViewer.ViewportWidth, PagesScrollViewer.ViewportHeight);
         // The percentage button works exactly when the zoom buttons do (a document is open).
         ViewModel.ZoomInCommand.CanExecuteChanged += (_, _) => ZoomPercentButton.IsEnabled = ViewModel.ZoomInCommand.CanExecute(null);
         PagesScrollViewer.ViewChanged += OnPagesViewChanged;
@@ -684,6 +685,7 @@ public sealed partial class MainWindow : Window
     {
         UpdatePageRowMinWidth();
         ScheduleViewedPagesUpdate();
+        _ = ViewModel.ApplyPendingOpenZoomAsync();
         if (!ViewModel.IsFitWidthActive || Math.Abs(e.NewSize.Width - e.PreviousSize.Width) < 0.5)
         {
             return;
@@ -723,7 +725,7 @@ public sealed partial class MainWindow : Window
 
     private async void OnSettingsClicked(object sender, RoutedEventArgs e)
     {
-        var dialog = new SettingsDialog(ViewModel.PageAreaBackground.Color, FileAssociationService.IsRegistered(), ViewModel.PageMode, ViewModel.WheelZoom, ViewModel.IsLcdTextEnabled, ViewModel.DeferWheelRender)
+        var dialog = new SettingsDialog(ViewModel.PageAreaBackground.Color, FileAssociationService.IsRegistered(), ViewModel.PageMode, ViewModel.WheelZoom, ViewModel.IsLcdTextEnabled, ViewModel.DeferWheelRender, ViewModel.OpenZoom)
         {
             XamlRoot = Content.XamlRoot,
         };
@@ -737,6 +739,7 @@ public sealed partial class MainWindow : Window
         ViewModel.UpdateBackgroundColor(dialog.SelectedColor);
         ViewModel.SetWheelZoom(dialog.SelectedWheelZoom);
         ViewModel.SetDeferWheelRender(dialog.DeferWheelRender);
+        ViewModel.SetOpenZoom(dialog.SelectedOpenZoom);
         ViewModel.SetLcdText(dialog.LcdText);
 
         if (dialog.SelectedMixedPagesMode != ViewModel.PageMode)

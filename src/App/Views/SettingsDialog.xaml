@@ -55,6 +55,17 @@
             </StackPanel>
 
             <StackPanel Spacing="4">
+                <TextBlock Text="Visualizzazione all'apertura di un documento" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                <RadioButtons x:Name="OpenZoomOptions" SelectedIndex="2" AutomationProperties.Name="Visualizzazione all'apertura">
+                    <RadioButton Content="Adatta alla larghezza" />
+                    <RadioButton Content="Adatta alla pagina" />
+                    <RadioButton Content="Dimensione reale (100%)" />
+                </RadioButtons>
+                <TextBlock TextWrapping="Wrap" Opacity="0.7" FontSize="12"
+                           Text="Come appare la prima pagina quando apri un PDF. Vale per i documenti che apri da ora: quello già aperto resta com'è. &quot;Adatta alla larghezza&quot; segue poi la finestra, se la ridimensioni." />
+            </StackPanel>
+
+            <StackPanel Spacing="4">
                 <TextBlock Text="Zoom con CTRL + rotellina del mouse" Style="{StaticResource BodyStrongTextBlockStyle}" />
                 <RadioButtons x:Name="WheelZoomOptions" SelectedIndex="0">
                     <RadioButton Content="Rotellina in avanti ingrandisce, indietro riduce" />

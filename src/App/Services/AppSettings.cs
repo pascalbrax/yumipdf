@@ -13,6 +13,19 @@ public enum WheelZoomDirection
     UpZoomsOut,
 }
 
+/// <summary>How a document is shown when it is opened ("Opzioni"). Listed in the order of the dialog's choices.</summary>
+public enum OpenZoomMode
+{
+    /// <summary>The first page fills the width of the window - and stays so while the window changes size, like "Adatta a larghezza".</summary>
+    FitWidth,
+
+    /// <summary>The whole first page is visible, like "Adatta a pagina".</summary>
+    FitPage,
+
+    /// <summary>The pages' real size: 100 %.</summary>
+    ActualSize,
+}
+
 /// <summary>User-configurable app preferences, persisted as JSON by <see cref="SettingsService"/>.</summary>
 public sealed class AppSettings
 {
@@ -38,6 +51,10 @@ public sealed class AppSettings
     /// <summary>Which way the wheel zooms in with CTRL held ("Opzioni"). Saved by name.</summary>
     [JsonConverter(typeof(JsonStringEnumConverter))]
     public WheelZoomDirection WheelZoom { get; set; } = WheelZoomDirection.UpZoomsIn;
+
+    /// <summary>How a document is shown when opened ("Opzioni"). Saved by name. Default: 100 %, what the app always did for the first document.</summary>
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public OpenZoomMode OpenZoom { get; set; } = OpenZoomMode.ActualSize;
 
     /// <summary>
     /// Whether a CTRL + wheel zoom only stretches the pictures the pages already have (a "fake" zoom, fast) and draws the pages again

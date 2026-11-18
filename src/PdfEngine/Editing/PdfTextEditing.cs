@@ -17,6 +17,13 @@ public sealed record PdfTextLine(int ObjectIndex, string Text, PdfRect Rect, str
 /// <param name="Undo">Reverts the edit, and re-applies it again: keep it for as long as the edit can be undone, then <see cref="IDisposable.Dispose"/> it.</param>
 public sealed record PdfTextEditResult(bool UsedFallbackFont, string? FallbackFontName, string MissingCharacters, PdfEditRecord Undo);
 
+/// <summary>What <see cref="PdfTextEditing.Insert"/> did.</summary>
+/// <param name="ObjectIndex">Position of the new line among the page's objects (what <see cref="PdfTextLine.ObjectIndex"/> will say).</param>
+/// <param name="FontName">The bundled font the line is drawn in.</param>
+/// <param name="MissingCharacters">Characters no available font can draw (they come out as an empty box).</param>
+/// <param name="Undo">Takes the line off the page, and puts it back: keep it for as long as the insertion can be undone, then <see cref="IDisposable.Dispose"/> it.</param>
+public sealed record PdfTextInsertResult(int ObjectIndex, string FontName, string MissingCharacters, PdfEditRecord Undo);
+
 /// <summary>
 /// An edit that can be undone and redone, in that order and no other: <c>Undo</c> and <c>Redo</c> alternate, and edits made
 /// after it invalidate it (the page's object indices have moved on), which the caller's undo stack guarantees by undoing in
@@ -146,6 +153,142 @@ public static class PdfTextEditing
 
             return (PdfEditRecord)new ObjectRemovalRecord(page.Document, objectIndex, obj);
         });
+
+    /// <summary>
+    /// Moves line <paramref name="objectIndex"/> by (<paramref name="dx"/>, <paramref name="dy"/>) points, as the page is <em>shown</em>
+    /// (x to the right, y up - so after the page's own rotation). The line keeps its index, its text and its look; any line can be moved,
+    /// one that the document already had as well as one added by <see cref="Insert"/> (after a reload there is no telling them apart).
+    /// </summary>
+    public static PdfEditRecord Move(PdfPage page, int objectIndex, double dx, double dy)
+        => PdfiumRuntime.Invoke(() =>
+        {
+            if (double.IsNaN(dx) || double.IsNaN(dy) || double.IsInfinity(dx) || double.IsInfinity(dy))
+            {
+                throw new ArgumentOutOfRangeException(nameof(dx), "Lo spostamento non è un numero valido.");
+            }
+
+            var rotation = ((PdfiumNative.FPDFPage_GetRotation(page.Handle) % 4) + 4) % 4;
+            var (ux, uy) = ToUnrotatedDelta(dx, dy, rotation);
+            var record = new TranslationRecord(objectIndex, ux, uy);
+            record.Apply(page, undo: false);
+            return (PdfEditRecord)record;
+        });
+
+    /// <summary>A shift of the page as it is shown, in the page's own (unrotated) coordinates: <see cref="ToUnrotated"/> for a vector.</summary>
+    internal static (double X, double Y) ToUnrotatedDelta(double dx, double dy, int rotation)
+        => rotation switch
+        {
+            1 => (-dy, dx),
+            2 => (-dx, -dy),
+            3 => (dy, -dx),
+            _ => (dx, dy),
+        };
+
+    /// <summary>
+    /// Adds a new line of text to the page, as page content (a text object: selectable and searchable in any reader, and
+    /// afterwards editable or deletable like the lines the document already had). It is drawn in a bundled open-source
+    /// font (Arial-compatible, with Latin, Greek and Cyrillic; Noto Sans for what that lacks) embedded in the document -
+    /// there is no document font to borrow, since the page may have none at all.
+    /// </summary>
+    /// <param name="left">Where the line starts, in points on the page <em>as it is shown</em> (origin bottom-left, so after the page's own rotation).</param>
+    /// <param name="top">Where the top of the letters is, same coordinates: the line hangs from this point like a text box whose top-left corner is clicked.</param>
+    /// <param name="fontSize">In points.</param>
+    /// <exception cref="ArgumentException">The text is empty (after turning line breaks into spaces).</exception>
+    public static PdfTextInsertResult Insert(PdfPage page, double left, double top, string text, double fontSize, PdfColor color)
+        => PdfiumRuntime.Invoke(() =>
+        {
+            var line = NormalizeLine(text);
+            if (line.Length == 0)
+            {
+                throw new ArgumentException("Il testo è vuoto.", nameof(text));
+            }
+
+            if (!(fontSize > 0) || double.IsInfinity(fontSize))
+            {
+                throw new ArgumentOutOfRangeException(nameof(fontSize), "La dimensione del testo deve essere positiva.");
+            }
+
+            var handle = page.Handle;
+            var document = page.Document.Handle;
+            var state = page.Document.EditingState;
+
+            // First font of the chain that draws every character; failing that, the one that draws the most.
+            IntPtr bestFont = IntPtr.Zero;
+            string bestName = string.Empty;
+            var bestMissing = line.Distinct().ToArray();
+            foreach (var (key, name) in FallbackFonts.Chain(FallbackFamily.Sans, bold: false, italic: false))
+            {
+                var candidate = state.GetFallbackFont(document, key, () => FallbackFonts.Load(key));
+                var absent = line.Distinct().Where(c => !state.FontHasGlyph(document, candidate, c)).ToArray();
+                if (bestFont == IntPtr.Zero || absent.Length < bestMissing.Length)
+                {
+                    bestFont = candidate;
+                    bestName = name;
+                    bestMissing = absent;
+                }
+
+                if (absent.Length == 0)
+                {
+                    break;
+                }
+            }
+
+            var obj = PdfiumNative.FPDFPageObj_CreateTextObj(document, bestFont, (float)fontSize);
+            if (obj == IntPtr.Zero || !PdfiumNative.FPDFText_SetText(obj, line))
+            {
+                if (obj != IntPtr.Zero)
+                {
+                    PdfiumNative.FPDFPageObj_Destroy(obj);
+                }
+
+                throw new PdfException(PdfErrorCode.Unknown, "Impossibile creare il testo.");
+            }
+
+            // The baseline, as shown, is a little under the top of the letters; then from the shown page to the page's own
+            // (unrotated) coordinates, with the text turned the other way so it stands upright when shown.
+            var (shownWidth, shownHeight) = page.SizeInPoints;
+            var rotation = ((PdfiumNative.FPDFPage_GetRotation(handle) % 4) + 4) % 4;
+            var (x, y) = ToUnrotated(left, top - fontSize * AscentRatio, shownWidth, shownHeight, rotation);
+            var (a, b, c, d) = rotation switch
+            {
+                1 => (0.0, 1.0, -1.0, 0.0),
+                2 => (-1.0, 0.0, 0.0, -1.0),
+                3 => (0.0, -1.0, 1.0, 0.0),
+                _ => (1.0, 0.0, 0.0, 1.0),
+            };
+            PdfiumNative.FPDFPageObj_Transform(obj, a, b, c, d, x, y);
+            PdfiumNative.FPDFPageObj_SetFillColor(obj, color.R, color.G, color.B, color.A);
+
+            var index = PdfiumNative.FPDFPage_CountObjects(handle);
+            if (!PdfiumNative.FPDFPage_InsertObjectAtIndex(handle, obj, (UIntPtr)index))
+            {
+                PdfiumNative.FPDFPageObj_Destroy(obj);
+                throw new PdfException(PdfErrorCode.Unknown, "Impossibile inserire il testo nella pagina.");
+            }
+
+            if (!PdfiumNative.FPDFPage_GenerateContent(handle))
+            {
+                throw new PdfException(PdfErrorCode.Unknown, "Impossibile aggiornare la pagina.");
+            }
+
+            return new PdfTextInsertResult(index, bestName, new string(bestMissing), new ObjectInsertionRecord(page.Document, index));
+        });
+
+    /// <summary>How far the top of the letters is above the baseline, as a fraction of the font size (a capital in Arial is 0.716 high, an ascender 0.73).</summary>
+    private const double AscentRatio = 0.75;
+
+    /// <summary>
+    /// A point of the page as it is shown (<paramref name="shownWidth"/> x <paramref name="shownHeight"/>, after
+    /// <paramref name="rotation"/> quarter turns clockwise) in the coordinates of the page's own content, before that rotation.
+    /// </summary>
+    internal static (double X, double Y) ToUnrotated(double x, double y, double shownWidth, double shownHeight, int rotation)
+        => rotation switch
+        {
+            1 => (shownHeight - y, x),
+            2 => (shownWidth - x, shownHeight - y),
+            3 => (y, shownWidth - x),
+            _ => (x, y),
+        };
 
     private static PdfTextEditResult ReplaceWithFallback(PdfPage page, PdfEditingState state, int index, IntPtr oldObject, IntPtr oldFont, string text)
     {
@@ -349,6 +492,37 @@ public static class PdfTextEditing
         }
     }
 
+    /// <summary>A line moved: undo and redo shift it back and forth by the same amount (in the page's own coordinates).</summary>
+    private sealed class TranslationRecord : PdfEditRecord
+    {
+        private readonly int _index;
+        private readonly double _dx;
+        private readonly double _dy;
+
+        public TranslationRecord(int index, double dx, double dy)
+        {
+            _index = index;
+            _dx = dx;
+            _dy = dy;
+        }
+
+        internal override void Apply(PdfPage page, bool undo)
+        {
+            var handle = page.Handle;
+            var obj = TextObjectAt(handle, _index);
+            var sign = undo ? -1.0 : 1.0;
+            PdfiumNative.FPDFPageObj_Transform(obj, 1, 0, 0, 1, sign * _dx, sign * _dy);
+            if (!PdfiumNative.FPDFPage_GenerateContent(handle))
+            {
+                throw new PdfException(PdfErrorCode.Unknown, "Impossibile spostare il testo.");
+            }
+        }
+
+        public override void Dispose()
+        {
+        }
+    }
+
     /// <summary>A line swapped for another object (the fallback-font rewrite): undo and redo swap them back and forth, the one not on the page being kept here.</summary>
     private sealed class ObjectSwapRecord : PdfEditRecord
     {
@@ -391,6 +565,69 @@ public static class PdfTextEditing
 
         public override void Dispose() => PdfiumRuntime.Invoke(() =>
         {
+            if (_offPage != IntPtr.Zero)
+            {
+                _document.EditingState.Release(_offPage);
+                _offPage = IntPtr.Zero;
+            }
+
+            return 0;
+        });
+    }
+
+    /// <summary>
+    /// A line that was added to the page: undo takes it off (the record then holds it), redo puts it back. The object the insertion
+    /// made is not remembered - a page is loaded again for every edit, so its objects are new ones each time and the handle
+    /// from <see cref="Insert"/> is gone - but the line is where it was put, at <c>_index</c>, until the next undo step.
+    /// </summary>
+    private sealed class ObjectInsertionRecord : PdfEditRecord
+    {
+        private readonly PdfDocument _document;
+        private readonly int _index;
+        private IntPtr _offPage;
+
+        public ObjectInsertionRecord(PdfDocument document, int index)
+        {
+            _document = document;
+            _index = index;
+        }
+
+        internal override void Apply(PdfPage page, bool undo)
+        {
+            var handle = page.Handle;
+            var state = _document.EditingState;
+            if (undo)
+            {
+                var current = PdfiumNative.FPDFPage_GetObject(handle, _index);
+                if (_offPage != IntPtr.Zero || current == IntPtr.Zero || PdfiumNative.FPDFPageObj_GetType(current) != TextObject
+                    || !PdfiumNative.FPDFPage_RemoveObject(handle, current))
+                {
+                    throw new PdfException(PdfErrorCode.Unknown, "Impossibile togliere il testo inserito.");
+                }
+
+                state.Orphan(current);
+                _offPage = current;
+            }
+            else
+            {
+                if (_offPage == IntPtr.Zero || !PdfiumNative.FPDFPage_InsertObjectAtIndex(handle, _offPage, (UIntPtr)_index))
+                {
+                    throw new PdfException(PdfErrorCode.Unknown, "Impossibile reinserire il testo.");
+                }
+
+                state.Adopt(_offPage);
+                _offPage = IntPtr.Zero;
+            }
+
+            if (!PdfiumNative.FPDFPage_GenerateContent(handle))
+            {
+                throw new PdfException(PdfErrorCode.Unknown, "Impossibile aggiornare la pagina.");
+            }
+        }
+
+        public override void Dispose() => PdfiumRuntime.Invoke(() =>
+        {
+            // On the page the line belongs to the page; off it, to the state - which frees it.
             if (_offPage != IntPtr.Zero)
             {
                 _document.EditingState.Release(_offPage);

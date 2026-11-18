@@ -218,6 +218,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         IsSnapToGridEnabled = _settings.SnapToGrid;
         _pageMode = _settings.MixedPagesMode;
         WheelZoom = _settings.WheelZoom;
+        OpenZoom = _settings.OpenZoom;
         DeferWheelRender = _settings.DeferRenderOnWheelZoom;
         IsLcdTextEnabled = _settings.LcdText;
         _restoringSettings = false;
@@ -339,7 +340,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             CurrentPageIndex = 0;
             IsFitWidthActive = false;
             LoadPageSizes(_document);
-            Zoom = Math.Min(Zoom, _maxZoomForDocument);
+            SetZoomForNewDocument();
 
             LoadFormFields(_document);
 
@@ -556,6 +557,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public Task SetZoomAsync(double zoom, bool deferRender = false)
     {
         IsFitWidthActive = false;
+        _openZoomPending = false;
         return ApplyZoomAsync(Math.Clamp(zoom, MinZoom, _maxZoomForDocument), deferRender);
     }
 
@@ -606,6 +608,81 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         RenderSettingsVersion++;
         RequestPageWindow();
+    }
+
+    /// <summary>How a document is shown when it is opened (width of the window, whole page, or 100 %); the choice is in "Opzioni".</summary>
+    public OpenZoomMode OpenZoom { get; private set; }
+
+    /// <summary>Remembers the choice for the next document opened: the one on screen keeps its zoom.</summary>
+    public void SetOpenZoom(OpenZoomMode mode)
+    {
+        OpenZoom = mode;
+        _settings.OpenZoom = mode;
+        SaveSettings();
+    }
+
+    /// <summary>The room the pages have in the window (width, height in pixels), as the view reports it; (0, 0) while the window has not been laid out yet.</summary>
+    public Func<(double Width, double Height)>? ViewportProvider { get; set; }
+
+    private bool _openZoomPending;
+
+    /// <summary>
+    /// The zoom a document starts with, from <see cref="OpenZoom"/>. A fit needs the room the window leaves for the pages: if the
+    /// window has not been laid out yet (a file given on the command line is opened while the window is still being built) the
+    /// zoom is 100 % for now and <see cref="ApplyPendingOpenZoomAsync"/> fits it as soon as the room is known.
+    /// </summary>
+    private void SetZoomForNewDocument()
+    {
+        _openZoomPending = false;
+        var zoom = BaseZoom;
+        if (OpenZoom != OpenZoomMode.ActualSize && _pageSizesPt.Count > 0)
+        {
+            if (OpenZoomFor(OpenZoom) is { } fitted)
+            {
+                zoom = fitted;
+                IsFitWidthActive = OpenZoom == OpenZoomMode.FitWidth;
+            }
+            else
+            {
+                _openZoomPending = true;
+            }
+        }
+
+        Zoom = Math.Clamp(zoom, MinZoom, _maxZoomForDocument);
+    }
+
+    /// <summary>The zoom that fits the first page for <paramref name="mode"/>, or <c>null</c> when the room for the pages is not known yet.</summary>
+    private double? OpenZoomFor(OpenZoomMode mode)
+    {
+        var (width, height) = ViewportProvider?.Invoke() ?? (0, 0);
+        if (width <= 0 || height <= 0)
+        {
+            return null;
+        }
+
+        var (pageWidth, pageHeight) = _pageSizesPt[0];
+        var referenceWidth = PageLayout.FitReferenceWidth(_pageMode, pageWidth, _commonWidth);
+        if (referenceWidth <= 0 || pageHeight <= 0)
+        {
+            return BaseZoom;
+        }
+
+        var forWidth = (width - FitMargin) / referenceWidth;
+        var zoom = mode == OpenZoomMode.FitPage ? Math.Min(forWidth, (height - FitMargin) / pageHeight) : forWidth;
+        return Math.Clamp(zoom, MinZoom, _maxZoomForDocument);
+    }
+
+    /// <summary>Called by the view whenever the room for the pages changes: fits a document that was opened before that room was known (see <see cref="SetZoomForNewDocument"/>).</summary>
+    public Task ApplyPendingOpenZoomAsync()
+    {
+        if (!_openZoomPending || _document is null || OpenZoomFor(OpenZoom) is not { } zoom)
+        {
+            return Task.CompletedTask;
+        }
+
+        _openZoomPending = false;
+        IsFitWidthActive = OpenZoom == OpenZoomMode.FitWidth;
+        return ApplyZoomAsync(zoom);
     }
 
     /// <summary>Which way the mouse wheel zooms in with CTRL held; the choice is in "Opzioni".</summary>

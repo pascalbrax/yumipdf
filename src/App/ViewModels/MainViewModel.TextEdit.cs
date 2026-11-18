@@ -152,6 +152,29 @@ public partial class MainViewModel
         return true;
     }
 
+    /// <summary>
+    /// Moves a line by (<paramref name="dxPoints"/>, <paramref name="dyPoints"/>) as the page is shown (y up). It keeps its place in the
+    /// page's objects, so it stays selected; Ctrl+Z puts it back.
+    /// </summary>
+    public async Task<bool> MoveTextLineAsync(PdfPageViewModel page, PdfTextLine line, double dxPoints, double dyPoints)
+    {
+        PdfEditRecord? record = null;
+        var done = await EditPageAsync(page.Index, "spostare il testo", pdfPage =>
+        {
+            record = PdfTextEditing.Move(pdfPage, line.ObjectIndex, dxPoints, dyPoints);
+            return line.ObjectIndex;
+        }, textChanged: true).ConfigureAwait(true);
+
+        if (done is null || record is null)
+        {
+            return false;
+        }
+
+        PushUndo(TextEditEntry(page.Index, $"spostamento di una riga a pagina {page.Index + 1}", record));
+        SelectedTextLine = new TextLineSelection(page, line.ObjectIndex);
+        return true;
+    }
+
     /// <summary>Tells the user when the line was rewritten in another font, and about characters nothing could draw.</summary>
     private void ReportTextEdit(PdfTextEditResult outcome)
     {

@@ -23,6 +23,7 @@ Il pannello "Strumenti" (note, timbri, modifica del testo, campi modulo) e la fi
 - Visualizzazione a scorrimento continuo di tutte le pagine (rendering PDFium), con placeholder
   dimensionati subito e bitmap popolati progressivamente
 - Zoom (+/-, percentuale da digitare, CTRL + rotellina ancorata al puntatore) e adatta a larghezza/pagina
+- Come si apre un documento a scelta dalle Opzioni: adatto alla larghezza, alla pagina intera o al 100 %
 - Testo nitido come in Acrobat: rendering a sub-pixel LCD (ClearType), disattivabile dalle Opzioni
 - Apertura di documenti protetti da password, con richiesta e nuovo tentativo in caso di errore
 - Sfondo dell'area pagina a scelta fra 16 colori pastello (menu Opzioni)
@@ -41,6 +42,8 @@ Il pannello "Strumenti" (note, timbri, modifica del testo, campi modulo) e la fi
 - Modifica del testo già presente nelle pagine (pannello "Strumenti" > "Modifica testo"): si seleziona una riga, la si
   riscrive o la si elimina. Se il font del documento (di solito un sottoinsieme) non ha le lettere digitate, la riga
   è riscritta con un font open source incorporato di aspetto simile (Liberation/Noto Sans, SIL OFL)
+- Aggiungere una riga di testo in un punto scelto della pagina (pannello "Strumenti" > "Aggiungi una riga di testo"; dimensione e colore a
+  scelta): diventa testo vero della pagina, selezionabile e ricercabile, modificabile con "Modifica testo", trascinabile con il mouse e annullabile con Ctrl+Z
 - "Aggancia alla griglia": una griglia di punti (ogni 10 pt) sulle pagine, a cui campi modulo, note e timbri si agganciano, per
   allineare facilmente più campi uno sotto l'altro
 - Annulla/Ripeti (Ctrl+Z, Ctrl+Y; pulsanti in barra con il pannello "Strumenti" aperto) per note, timbri, campi aggiunti e modifiche al testo

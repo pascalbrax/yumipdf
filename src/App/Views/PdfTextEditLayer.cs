@@ -6,6 +6,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
+using PdfEngine.Annotations;
 using PdfEngine.Editing;
 using Pdf26.ViewModels;
 using Windows.System;
@@ -25,8 +26,18 @@ public sealed class PdfTextEditLayer : Canvas
         nameof(Page), typeof(PdfPageViewModel), typeof(PdfTextEditLayer), new PropertyMetadata(null, OnPageChanged));
 
     private const double MinHitSize = 8;
+    private const double DragThreshold = 3;
+
+    /// <summary>How far a line's frame sticks out left of and above its text, in pixels (see <see cref="Rebuild"/>).</summary>
+    private const double FrameLeftPad = 2;
+    private const double FrameTopPad = 1;
 
     private readonly Dictionary<int, Border> _boxes = new();
+
+    private PdfTextLine? _dragging;
+    private Windows.Foundation.Point _dragStart;
+    private double _dragOriginLeft, _dragOriginTop;
+    private bool _dragMoved;
 
     public PdfPageViewModel? Page
     {
@@ -110,13 +121,16 @@ public sealed class PdfTextEditLayer : Canvas
                 UseSystemFocusVisuals = false,
                 Tag = line,
             };
-            SetLeft(element, line.Rect.Left * zoom - 2);
-            SetTop(element, (page.PointHeight - line.Rect.Top) * zoom - 1);
-            ToolTipService.SetToolTip(element, $"{line.FontName} · {line.FontSize:0.#} pt · doppio clic per modificare");
+            SetLeft(element, line.Rect.Left * zoom - FrameLeftPad);
+            SetTop(element, (page.PointHeight - line.Rect.Top) * zoom - FrameTopPad);
+            ToolTipService.SetToolTip(element, $"{line.FontName} · {line.FontSize:0.#} pt · doppio clic per modificare, trascina per spostare");
             ToolTipService.SetPlacement(element, PlacementMode.Mouse);
             element.PointerEntered += OnLinePointerEntered;
             element.PointerExited += OnLinePointerExited;
             element.PointerPressed += OnLinePointerPressed;
+            element.PointerMoved += OnLinePointerMoved;
+            element.PointerReleased += OnLinePointerReleased;
+            element.PointerCaptureLost += OnLinePointerCaptureLost;
             element.DoubleTapped += OnLineDoubleTapped;
             element.KeyDown += OnLineKeyDown;
             Children.Add(element);
@@ -154,7 +168,7 @@ public sealed class PdfTextEditLayer : Canvas
     {
         var box = (Border)sender;
         box.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x22, 0x26, 0x83, 0xDB));
-        ProtectedCursor = InputSystemCursor.Create(InputSystemCursorShape.IBeam);
+        ProtectedCursor = InputSystemCursor.Create(InputSystemCursorShape.SizeAll);
     }
 
     private void OnLinePointerExited(object sender, PointerRoutedEventArgs e)
@@ -173,7 +187,93 @@ public sealed class PdfTextEditLayer : Canvas
 
         page.Owner.SelectTextLine(page, line);
         box.Focus(FocusState.Pointer);
+
+        // A press may turn into a drag (moving the line) once the pointer travels a few pixels; a click that does not stays a selection.
+        _dragging = line;
+        _dragMoved = false;
+        _dragStart = e.GetCurrentPoint(this).Position;
+        _dragOriginLeft = GetLeft(box);
+        _dragOriginTop = GetTop(box);
+        box.CapturePointer(e.Pointer);
         e.Handled = true;
+    }
+
+    private void OnLinePointerMoved(object sender, PointerRoutedEventArgs e)
+    {
+        if (_dragging is not { } line || Page is not { } page || !_boxes.TryGetValue(line.ObjectIndex, out var box))
+        {
+            return;
+        }
+
+        var position = e.GetCurrentPoint(this).Position;
+        var dx = position.X - _dragStart.X;
+        var dy = position.Y - _dragStart.Y;
+        if (!_dragMoved && Math.Abs(dx) < DragThreshold && Math.Abs(dy) < DragThreshold)
+        {
+            return;
+        }
+
+        _dragMoved = true;
+        // The frame sticks out of the text by (FrameLeftPad, FrameTopPad) pixels: it is the text's own corner that snaps to the grid.
+        var left = Math.Clamp(Snapped(_dragOriginLeft + dx + FrameLeftPad) - FrameLeftPad, 0, Math.Max(0, page.PixelWidth - box.Width));
+        var top = Math.Clamp(Snapped(_dragOriginTop + dy + FrameTopPad) - FrameTopPad, 0, Math.Max(0, page.PixelHeight - box.Height));
+        SetLeft(box, left);
+        SetTop(box, top);
+        e.Handled = true;
+    }
+
+    private async void OnLinePointerReleased(object sender, PointerRoutedEventArgs e)
+    {
+        if (_dragging is not { } line || Page is not { } page || !_boxes.TryGetValue(line.ObjectIndex, out var box))
+        {
+            return;
+        }
+
+        var moved = _dragMoved;
+        _dragging = null;
+        ((UIElement)sender).ReleasePointerCapture(e.Pointer);
+        e.Handled = true;
+
+        if (!moved)
+        {
+            return;
+        }
+
+        // Pixels to points; the page's y axis points up, the screen's down.
+        var zoom = page.Scale;
+        var dxPt = (GetLeft(box) - _dragOriginLeft) / zoom;
+        var dyPt = -(GetTop(box) - _dragOriginTop) / zoom;
+        if (Math.Abs(dxPt) < 0.01 && Math.Abs(dyPt) < 0.01)
+        {
+            return;
+        }
+
+        await page.Owner.MoveTextLineAsync(page, line, dxPt, dyPt);
+    }
+
+    private void OnLinePointerCaptureLost(object sender, PointerRoutedEventArgs e)
+    {
+        // Capture lost without a release (focus stolen mid-drag): put the frame back where the document has the line.
+        if (_dragging is not null)
+        {
+            _dragging = null;
+            Rebuild();
+        }
+    }
+
+    /// <summary>
+    /// With "Aggancia alla griglia" on, a coordinate (pixels from the page's top-left) goes to the nearest grid point - the same grid
+    /// <see cref="PdfAnnotationLayer"/> snaps to.
+    /// </summary>
+    private double Snapped(double pixels)
+    {
+        if (Page is not { } page || !page.Owner.IsGridActive)
+        {
+            return pixels;
+        }
+
+        var step = PageGrid.StepPt * page.Scale;
+        return Math.Round(pixels / step, MidpointRounding.AwayFromZero) * step;
     }
 
     private void OnLineDoubleTapped(object sender, DoubleTappedRoutedEventArgs e)

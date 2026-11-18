@@ -17,6 +17,9 @@ public enum AnnotationTool
     ImageStamp,
     TextField,
     CheckBoxField,
+
+    /// <summary>A new line of text as page content (see MainViewModel.TextInsert.cs).</summary>
+    TextLine,
 }
 
 /// <summary>A ready-made text stamp: the wording and the color of its type and frame.</summary>
@@ -154,6 +157,7 @@ public partial class MainViewModel
         AnnotationTool.ImageStamp => $"Fai clic sulla pagina per inserire l'immagine \"{_pendingImageStamp?.Name}\" · Esc per annullare",
         AnnotationTool.TextField => "Fai clic sulla pagina per inserire il campo di testo · Esc per annullare",
         AnnotationTool.CheckBoxField => "Fai clic sulla pagina per inserire la casella di controllo · Esc per annullare",
+        AnnotationTool.TextLine => "Fai clic sulla pagina dove deve comparire il testo · Esc per annullare",
         _ => null,
     };
 
@@ -172,6 +176,7 @@ public partial class MainViewModel
 
         OnPropertyChanged(nameof(IsPlacingAnnotation));
         OnPropertyChanged(nameof(IsNoteToolActive));
+        OnPropertyChanged(nameof(IsInsertTextToolActive));
         OnPropertyChanged(nameof(AnnotationHint));
         NotifyFieldTools();
     }

@@ -135,7 +135,62 @@ public sealed class PdfAnnotationLayer : Canvas
         e.Handled = true;
         var point = e.GetCurrentPoint(this).Position;
         var (xPt, yPt) = ToPagePoint(page, point.X, point.Y);
+        if (page.Owner.ActiveAnnotationTool == AnnotationTool.TextLine)
+        {
+            // A new line of text: the tool ends with the click, and a box to type it in opens right there.
+            page.Owner.CancelAnnotationTool();
+            ShowTextInsertEditor(page, point, xPt, yPt);
+            return;
+        }
+
         await page.Owner.PlaceAnnotationAsync(page.Index, xPt, yPt);
+    }
+
+    /// <summary>
+    /// The box where the new line is typed, at the spot that was clicked: Enter (or "Inserisci") puts the text on the page, Esc or a
+    /// click away drops it. The size and the color come from the tools panel; the box says which.
+    /// </summary>
+    private void ShowTextInsertEditor(PdfPageViewModel page, Windows.Foundation.Point at, double xPt, double yPt)
+    {
+        var owner = page.Owner;
+        var text = new TextBox { Width = 320, AcceptsReturn = false, PlaceholderText = "Scrivi il testo" };
+        var apply = new Button { Content = "Inserisci", Style = (Style)Application.Current.Resources["AccentButtonStyle"], MinWidth = 90 };
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, HorizontalAlignment = HorizontalAlignment.Right };
+        buttons.Children.Add(apply);
+
+        var panel = new StackPanel { Spacing = 10 };
+        panel.Children.Add(text);
+        panel.Children.Add(new TextBlock
+        {
+            Text = $"{owner.InsertTextSize:0.#} pt · {owner.InsertTextColor.Name}. Il testo parte da questo punto; una volta inserito si cambia con \"Modifica testo\".",
+            TextWrapping = TextWrapping.Wrap,
+            Opacity = 0.7,
+            FontSize = 12,
+            MaxWidth = 320,
+        });
+        panel.Children.Add(buttons);
+
+        var flyout = new Flyout { Content = panel, Placement = FlyoutPlacementMode.BottomEdgeAlignedLeft };
+        var accepted = false;
+        apply.Click += (_, _) => { accepted = true; flyout.Hide(); };
+        text.KeyDown += (_, args) =>
+        {
+            if (args.Key == Windows.System.VirtualKey.Enter)
+            {
+                args.Handled = true;
+                accepted = true;
+                flyout.Hide();
+            }
+        };
+        flyout.Opened += (_, _) => text.Focus(FocusState.Programmatic);
+        flyout.Closed += async (_, _) =>
+        {
+            if (accepted)
+            {
+                await owner.InsertTextAsync(page.Index, xPt, yPt, text.Text);
+            }
+        };
+        flyout.ShowAt(this, new FlyoutShowOptions { Position = at, Placement = FlyoutPlacementMode.BottomEdgeAlignedLeft });
     }
 
     // ---- building ----------------------------------------------------------------------
