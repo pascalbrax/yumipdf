@@ -23,6 +23,7 @@ Il pannello "Strumenti" (note, timbri, modifica del testo, campi modulo) e la fi
 - Visualizzazione a scorrimento continuo di tutte le pagine (rendering PDFium), con placeholder
   dimensionati subito e bitmap popolati progressivamente
 - Zoom (+/-, percentuale da digitare, CTRL + rotellina ancorata al puntatore) e adatta a larghezza/pagina
+- Rilevatore di colori per il daltonismo (opzione nelle Opzioni): croce sul PDF e, dopo un secondo, valore RGB e nome del colore sotto il mouse
 - Come si apre un documento a scelta dalle Opzioni: adatto alla larghezza, alla pagina intera o al 100 %
 - Testo nitido come in Acrobat: rendering a sub-pixel LCD (ClearType), disattivabile dalle Opzioni
 - Apertura di documenti protetti da password, con richiesta e nuovo tentativo in caso di errore

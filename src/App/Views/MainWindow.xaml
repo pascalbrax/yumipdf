@@ -82,6 +82,15 @@
                           ToolTipService.ToolTip="Riordina ed elimina le pagine"
                           IsEnabled="{x:Bind ViewModel.CanOrganizePages, Mode=OneWay}"
                           Visibility="{x:Bind ViewModel.DocumentToolsVisibility, Mode=OneWay}" />
+            <!-- The colour detector (Opzioni > daltonismo): shown only with that option on and a document open. -->
+            <AppBarToggleButton x:Name="ColorDetectorButton" Label="Colori" LabelPosition="Collapsed" IsChecked="{x:Bind ViewModel.IsColorDetectorActive, Mode=TwoWay}"
+                                AutomationProperties.Name="Rilevatore di colori"
+                                ToolTipService.ToolTip="Rilevatore di colori: tieni fermo il mouse su un punto della pagina per vedere il colore"
+                                Visibility="{x:Bind ViewModel.ColorDetectorButtonVisibility, Mode=OneWay}">
+                <AppBarToggleButton.Icon>
+                    <FontIcon Glyph="&#xE790;" />
+                </AppBarToggleButton.Icon>
+            </AppBarToggleButton>
             <AppBarSeparator />
             <!-- Ctrl+F works from anywhere in the window - a KeyboardAccelerator bubbles up regardless of which control currently has focus. -->
             <AppBarToggleButton x:Name="SearchToggle" Icon="Find" Label="Cerca" IsChecked="{x:Bind ViewModel.IsSearchOpen, Mode=TwoWay}">
@@ -698,6 +707,13 @@
                                                 </DataTemplate>
                                             </ItemsControl.ItemTemplate>
                                         </ItemsControl>
+
+                                        <!--
+                                            The colour detector: covers the page (cross pointer, popup with the colour after a second of
+                                            stillness) only while the detector is on; off, it is not hit-test visible (PdfColorDetectorLayer).
+                                        -->
+                                        <local:PdfColorDetectorLayer Page="{x:Bind}"
+                                                                      Width="{x:Bind PixelWidth, Mode=OneWay}" Height="{x:Bind PixelHeight, Mode=OneWay}" />
 
                                         <!-- The page's outline, over the picture instead of around it (see the note on the Border). -->
                                         <Border IsHitTestVisible="False" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" />

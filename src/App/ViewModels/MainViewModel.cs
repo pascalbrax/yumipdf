@@ -219,6 +219,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _pageMode = _settings.MixedPagesMode;
         WheelZoom = _settings.WheelZoom;
         OpenZoom = _settings.OpenZoom;
+        IsColorDetectorEnabled = _settings.ColorDetectorEnabled;
         DeferWheelRender = _settings.DeferRenderOnWheelZoom;
         IsLcdTextEnabled = _settings.LcdText;
         _restoringSettings = false;

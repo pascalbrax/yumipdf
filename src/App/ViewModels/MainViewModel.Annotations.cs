@@ -150,7 +150,9 @@ public partial class MainViewModel
     }
 
     /// <summary>What to tell the user while a tool waits for a click on the page.</summary>
-    public string? AnnotationHint => ActiveAnnotationTool switch
+    public string? AnnotationHint => IsColorDetectorActive
+        ? "Rilevatore di colori: tieni fermo il mouse su un punto della pagina per vedere il colore · Esc per uscire"
+        : ActiveAnnotationTool switch
     {
         AnnotationTool.Note => "Fai clic sulla pagina per inserire la nota · Esc per annullare",
         AnnotationTool.TextStamp => $"Fai clic sulla pagina per inserire il timbro \"{_pendingTextStamp?.Text}\" · Esc per annullare",
@@ -172,6 +174,7 @@ public partial class MainViewModel
         if (value != AnnotationTool.None)
         {
             IsTextEditTool = false;
+            IsColorDetectorActive = false;
         }
 
         OnPropertyChanged(nameof(IsPlacingAnnotation));
@@ -237,6 +240,7 @@ public partial class MainViewModel
     private void ResetAnnotationState()
     {
         OnPropertyChanged(nameof(DocumentToolsVisibility));
+        OnPropertyChanged(nameof(ColorDetectorButtonVisibility));
         NotifyToolsPane();
         CancelAnnotationTool();
         SelectedAnnotation = null;

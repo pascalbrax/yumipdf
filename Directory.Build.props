@@ -7,7 +7,7 @@
     derive from Version unless a project overrides them explicitly.
   -->
   <PropertyGroup>
-    <Version>0.4.1</Version>
+    <Version>0.4.2</Version>
     <Company>Pascal Brax</Company>
     <Copyright>© $([System.DateTime]::Now.Year) Pascal Brax</Copyright>
   </PropertyGroup>

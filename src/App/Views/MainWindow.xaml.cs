@@ -130,10 +130,16 @@ public sealed partial class MainWindow : Window
 
     private void OnViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
+        // The window's title names the open document: "nome.pdf - YumiPDF".
+        if (e.PropertyName == nameof(MainViewModel.DocumentTitle))
+        {
+            Title = string.IsNullOrWhiteSpace(ViewModel.DocumentTitle) ? "YumiPDF" : $"{ViewModel.DocumentTitle} - YumiPDF";
+        }
+
         // Buttons that appear or disappear (a document opened, a panel shown) change how much of the toolbar fits.
         if (e.PropertyName is nameof(MainViewModel.DocumentToolsVisibility) or nameof(MainViewModel.ThumbnailButtonVisibility)
             or nameof(MainViewModel.BookmarkButtonVisibility) or nameof(MainViewModel.FormButtonVisibility)
-            or nameof(MainViewModel.IsToolsPaneOpen))
+            or nameof(MainViewModel.IsToolsPaneOpen) or nameof(MainViewModel.ColorDetectorButtonVisibility))
         {
             RefreshToolbarOverflow();
         }
@@ -725,7 +731,7 @@ public sealed partial class MainWindow : Window
 
     private async void OnSettingsClicked(object sender, RoutedEventArgs e)
     {
-        var dialog = new SettingsDialog(ViewModel.PageAreaBackground.Color, FileAssociationService.IsRegistered(), ViewModel.PageMode, ViewModel.WheelZoom, ViewModel.IsLcdTextEnabled, ViewModel.DeferWheelRender, ViewModel.OpenZoom)
+        var dialog = new SettingsDialog(ViewModel.PageAreaBackground.Color, FileAssociationService.IsRegistered(), ViewModel.PageMode, ViewModel.WheelZoom, ViewModel.IsLcdTextEnabled, ViewModel.DeferWheelRender, ViewModel.OpenZoom, ViewModel.IsColorDetectorEnabled)
         {
             XamlRoot = Content.XamlRoot,
         };
@@ -740,6 +746,7 @@ public sealed partial class MainWindow : Window
         ViewModel.SetWheelZoom(dialog.SelectedWheelZoom);
         ViewModel.SetDeferWheelRender(dialog.DeferWheelRender);
         ViewModel.SetOpenZoom(dialog.SelectedOpenZoom);
+        ViewModel.SetColorDetectorEnabled(dialog.ColorDetector);
         ViewModel.SetLcdText(dialog.LcdText);
 
         if (dialog.SelectedMixedPagesMode != ViewModel.PageMode)
@@ -1109,6 +1116,11 @@ public sealed partial class MainWindow : Window
         {
             args.Handled = true;
             OnOrganizeCloseRequested(this, EventArgs.Empty);
+        }
+        else if (ViewModel.IsColorDetectorActive)
+        {
+            ViewModel.IsColorDetectorActive = false;
+            args.Handled = true;
         }
         else if (ViewModel.IsPlacingAnnotation)
         {

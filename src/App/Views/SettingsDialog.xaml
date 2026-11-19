@@ -77,6 +77,13 @@
             </StackPanel>
 
             <StackPanel Spacing="4">
+                <ToggleSwitch x:Name="ColorDetectorToggle" Header="Daltonismo: rilevatore di colori" OnContent="Attivo" OffContent="Non attivo"
+                              AutomationProperties.Name="Rilevatore di colori per il daltonismo" />
+                <TextBlock TextWrapping="Wrap" Opacity="0.7" FontSize="12"
+                           Text="Aggiunge alla barra dei pulsanti il pulsante &quot;Colori&quot;. Quando è attivo il puntatore diventa una croce sulle pagine e, se lo tieni fermo per un secondo, compare sotto di esso il valore RGB del punto e il nome del colore (o del colore più vicino). Il colore è quello dell'immagine mostrata: sul bordo delle lettere è una via di mezzo fra lettera e sfondo, quindi per una lettura esatta punta al centro di un'area piena." />
+            </StackPanel>
+
+            <StackPanel Spacing="4">
                 <ToggleSwitch x:Name="LcdTextToggle" Header="Testo più nitido (sub-pixel LCD)" OnContent="Attivo" OffContent="Non attivo" />
                 <TextBlock TextWrapping="Wrap" Opacity="0.7" FontSize="12"
                            Text="Disegna il testo delle pagine come fa Acrobat sui monitor LCD, usando i tre punti colorati di ogni pixel: i caratteri sono più definiti, con un leggero bordo colorato. Disattivalo se hai uno schermo ruotato o con punti non in ordine R, G, B (le lettere avrebbero un alone di colore). Si applica subito." />

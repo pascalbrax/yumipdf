@@ -57,6 +57,12 @@ public sealed class AppSettings
     public OpenZoomMode OpenZoom { get; set; } = OpenZoomMode.ActualSize;
 
     /// <summary>
+    /// Whether the toolbar has the colour detector button (for colour blindness: it tells the RGB value and the name of the colour under
+    /// the mouse). Off by default; "Opzioni" turns it on.
+    /// </summary>
+    public bool ColorDetectorEnabled { get; set; }
+
+    /// <summary>
     /// Whether a CTRL + wheel zoom only stretches the pictures the pages already have (a "fake" zoom, fast) and draws the pages again
     /// once CTRL is released, instead of drawing them again after every notch. On by default.
     /// </summary>

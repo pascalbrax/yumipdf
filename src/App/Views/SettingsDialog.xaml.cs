@@ -7,7 +7,7 @@ namespace Pdf26.Views;
 
 public sealed partial class SettingsDialog : ContentDialog
 {
-    public SettingsDialog(Color currentPageAreaBackground, bool isPdfAssociated, MixedPagesMode mixedPagesMode, WheelZoomDirection wheelZoom, bool lcdText, bool deferWheelRender, OpenZoomMode openZoom)
+    public SettingsDialog(Color currentPageAreaBackground, bool isPdfAssociated, MixedPagesMode mixedPagesMode, WheelZoomDirection wheelZoom, bool lcdText, bool deferWheelRender, OpenZoomMode openZoom, bool colorDetector)
     {
         InitializeComponent();
         _currentBackground = currentPageAreaBackground;
@@ -21,7 +21,11 @@ public sealed partial class SettingsDialog : ContentDialog
         LcdTextToggle.IsOn = lcdText;
         DeferWheelRenderToggle.IsOn = deferWheelRender;
         OpenZoomOptions.SelectedIndex = (int)openZoom;
+        ColorDetectorToggle.IsOn = colorDetector;
     }
+
+    /// <summary>Whether the toolbar offers the colour detector.</summary>
+    public bool ColorDetector => ColorDetectorToggle.IsOn;
 
     /// <summary>The options are listed in the order of <see cref="OpenZoomMode"/>.</summary>
     public OpenZoomMode SelectedOpenZoom

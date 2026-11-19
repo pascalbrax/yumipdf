@@ -27,6 +27,7 @@ public partial class MainViewModel
         {
             CancelAnnotationTool();
             SelectAnnotation(null);
+            IsColorDetectorActive = false;
             foreach (var page in Pages)
             {
                 _ = EnsureTextLinesAsync(page);
